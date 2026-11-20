@@ -1,8 +1,8 @@
 # 一页纸 · 澄潇宇考研政治
 
-离线 Android 背诵工具：把“一页纸”考点做成可逐条刷眼、磨耳朵、微训练的本地应用。数据与语音均在本机，release 不申请网络权限。
+个人 Android 背诵工具：把“一页纸”考点做成可逐条刷眼、磨耳朵、微训练的本地应用。学习数据保存在本机；默认使用系统离线语音，可选的 DeepSeek 云语音需要网络与 API Key，release 因此声明 `INTERNET` 权限。
 
-**[下载最新 release](https://github.com/Qxy0happy/one-page-politics/releases/latest)** · 当前版本 `v1.0.0`
+**[下载最新 release](https://github.com/Qxy0happy/one-page-politics/releases/latest)** · 当前版本 `v1.1.0`
 
 ## 功能
 
@@ -15,17 +15,26 @@
 
 - **路径树**：科目下按章节展开；思修、新思想、时政按“配对 / 判断 / 对比”拆分；记住上次路径。
 - **搜索**：只搜当前路径，200 ms 防抖；无结果时可一键“在全部中搜索”。
-- **全离线**：条目、进度、真题记录都在本机；release 无 `INTERNET` 权限。
-- **磨耳朵**：使用系统 TTS 朗读当前列表；需系统安装中文离线语音数据。
+- **本地优先**：条目、进度、真题记录都在本机；默认系统语音完全离线。DeepSeek 云语音为可选项，仅在使用时访问网络。
+- **磨耳朵**：系统语音或 DeepSeek 云语音朗读当前列表；云语音合成音频在本机压制为 AAC/M4A 缓存，同一音色与文本再次朗读不再请求网络。
+- **可调停顿**：题干后与结论后的停顿均可在 0–5 秒内调整。
+
+## DeepSeek 云语音（可选）
+
+1. 打开磨耳朵 → 朗读设置 → 选择 DeepSeek，填写 API Key 并保存。
+2. 音色可选 `stella`（海星，女声）或 `tide`（暗潮，男声）；云端合成不支持调节语速。
+3. 合成音频按“音色 + 文本”缓存在应用私有目录 `tts_cache`，优先 AAC/M4A；编码器不可用时回退 WAV。
+4. API Key 以明文保存在本机 `SharedPreferences`，不随 Markdown 导出；费用按 DeepSeek 账户的字符计费规则结算。
+5. 失败提示：`401/403` 密钥无效，`400` 文本为空或未通过内容审核，`429` 请求过于频繁，`503` 服务繁忙，`504` 合成超时。
 
 ## 安装
 
-1. 从 [Releases](https://github.com/Qxy0happy/one-page-politics/releases/latest) 下载 APK（当前为 `one-page-politics-1.0.0.apk`）和 `.sha256`。
+1. 从 [Releases](https://github.com/Qxy0happy/one-page-politics/releases/latest) 下载 APK（当前为 `one-page-politics-1.1.0.apk`）和 `.sha256`。
 2. 在手机上允许“安装未知应用”，打开 APK 安装。
 3. 校验：
 
    ```bash
-   sha256sum -c one-page-politics-1.0.0.apk.sha256
+   sha256sum -c one-page-politics-1.1.0.apk.sha256
    ```
 
 4. 覆盖安装需要签名一致。当前 release 使用 debug 签名，仅用于个人侧载，不可用于商店分发。
@@ -33,7 +42,7 @@
 
 ## 从源码构建
 
-环境：Flutter 3.50 / Dart 3.14、Android SDK、标准 JDK 25（含 `jlink`，如 Temurin）。
+环境：Flutter 3.50 / Dart 3.14、Android SDK、标准 JDK 25 或 27（Temurin 或 OpenJDK；GraalVM 的 `jlink` 与 `jni` 插件不兼容）。
 
 ```bash
 git clone https://github.com/Qxy0happy/one-page-politics.git
@@ -45,6 +54,8 @@ flutter build apk --release
 ```
 
 产物：`app/build/app/outputs/flutter-apk/app-release.apk`（universal APK）。
+
+若 Flutter 配置指向 GraalVM，`flutter build apk` 会停在 `:jni:compileReleaseJavaWithJavac`；可在 `app/android` 下改用 OpenJDK 直接运行 `JAVA_HOME=/path/to/openjdk ./gradlew assembleRelease`。
 
 ## 目录
 
@@ -64,8 +75,9 @@ app/
 
 ## 版本与边界
 
-- 当前版本：`1.0.0+1`（release `v1.0.0`）。
-- 仅面向 Android 离线个人侧载；不做 iOS/桌面、商店分发、AAB、自动更新。
+- 当前版本：`1.1.0+2`（release `v1.1.0`）。
+- 仅面向 Android 个人侧载；默认系统语音离线，DeepSeek 云语音需要网络。不做 iOS/桌面、商店分发、AAB、自动更新。
+- API Key 以明文保存在本机 `SharedPreferences`；音频缓存占用应用私有存储，暂无清理入口。
 - 不提供云同步、进度备份/恢复与多设备迁移；卸载或更换签名会丢失本机进度。
 - 不提供后台播放、锁屏播放、蓝牙/耳机路由。
 - 新思想、时政等没有二级标题的科目当前按卡片类型拆分；后续可通过补 seed 二级标题继续细化。

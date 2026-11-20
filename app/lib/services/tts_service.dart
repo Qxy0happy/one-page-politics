@@ -1,45 +1,17 @@
 import 'dart:async';
 
 import 'package:flutter/foundation.dart';
-import 'package:flutter_tts/flutter_tts.dart';
 
 import '../models/knowledge_item.dart';
+import 'tts_engine.dart';
+
+export 'tts_engine.dart' show TtsEngine, normalizeLanguageTag;
 
 /// 试听固定短句。试听不占用队列索引，也不触碰学习状态。
 const String ttsPreviewSentence = '这是一段语音试听，如果你能听到这句话，说明中文语音可用。';
 
 /// 连续失败达到该数量时整队停止，进入降级态。
 const int ttsFailureThreshold = 3;
-
-/// 把语言标签归一化为 BCP-47 形式：大小写不敏感，`_` 视为 `-`。
-///
-/// 服务内部选择语言时使用；同时作为顶层函数公开，只为便于单元测试直接
-/// 覆盖归一化规则，不属于 UI 契约。
-String normalizeLanguageTag(String tag) {
-  final parts = tag
-      .trim()
-      .replaceAll('_', '-')
-      .split('-')
-      .where((part) => part.isNotEmpty)
-      .toList(growable: false);
-  if (parts.isEmpty) return '';
-  final normalized = <String>[];
-  for (var i = 0; i < parts.length; i++) {
-    final part = parts[i];
-    if (i == 0) {
-      normalized.add(part.toLowerCase());
-    } else if (part.length == 4) {
-      normalized.add(
-        '${part[0].toUpperCase()}${part.substring(1).toLowerCase()}',
-      );
-    } else if (part.length == 2) {
-      normalized.add(part.toUpperCase());
-    } else {
-      normalized.add(part.toLowerCase());
-    }
-  }
-  return normalized.join('-');
-}
 
 /// 题干朗读文本：为空时用占位文本，避免引擎朗读空白。
 ///
@@ -68,27 +40,27 @@ class _SpeakResult {
   final String message;
 }
 
+/// 朗读队列与播放状态机，不关心语音来自系统引擎还是云端合成。
+///
+/// 同一时刻只允许一个播放循环；播放、暂停、继续、上一条、下一条、关闭面板
+/// 都递增一个会话代次，旧循环在每次 `await` 之后检查代次，不匹配即退出。
 class TtsService extends ChangeNotifier {
   TtsService({
-    FlutterTts? tts,
+    required TtsEngine engine,
     Duration utteranceTimeout = const Duration(seconds: 60),
     Duration promptPause = const Duration(milliseconds: 1500),
     Duration answerPause = const Duration(milliseconds: 600),
-  }) : this._(tts ?? FlutterTts(), utteranceTimeout, promptPause, answerPause);
+  }) : _engine = engine, // ignore: prefer_initializing_formals
+       // ignore: prefer_initializing_formals
+       _utteranceTimeout = utteranceTimeout,
+       _promptPause = _nonNegative(promptPause),
+       _answerPause = _nonNegative(answerPause);
 
-  TtsService._(
-    this._tts,
-    this._utteranceTimeout,
-    this._promptPause,
-    this._answerPause,
-  ) {
-    _tts.setErrorHandler(_handlePlatformError);
-  }
-
-  final FlutterTts _tts;
+  final TtsEngine _engine;
   final Duration _utteranceTimeout;
-  final Duration _promptPause;
-  final Duration _answerPause;
+
+  Duration _promptPause;
+  Duration _answerPause;
 
   var _available = false;
   var _playing = false;
@@ -102,9 +74,6 @@ class TtsService extends ChangeNotifier {
   var _skippedCount = 0;
   var _consecutiveFailures = 0;
   var _lastError = '';
-  var _selectedLanguage = '';
-  var _engineName = '系统默认';
-  var _languageCount = 0;
   var _disposed = false;
 
   Completer<_SpeakResult>? _pending;
@@ -120,15 +89,20 @@ class TtsService extends ChangeNotifier {
   int get skippedCount => _skippedCount;
   String get lastError => _lastError;
 
+  bool get supportsRate => _engine.supportsRate;
+
+  Duration get promptPause => _promptPause;
+  Duration get answerPause => _answerPause;
+
   /// 播放队列是否出现过失败（降级或跳过条目）。
   ///
   /// 试听与语速设置的错误只写入 [lastError]，不计入该状态，避免把一次
   /// 试听失败误判成整队失败。
   bool get hasPlaybackFailure => _degraded || _skippedCount > 0;
 
-  String get selectedLanguage => _selectedLanguage;
-  String get engineName => _engineName;
-  int get languageCount => _languageCount;
+  String get selectedLanguage => _engine.selectedLanguage;
+  String get engineName => _engine.engineName;
+  int get languageCount => _engine.languageCount;
 
   KnowledgeItem? get current =>
       _items.isEmpty || _index >= _items.length ? null : _items[_index];
@@ -142,141 +116,27 @@ class TtsService extends ChangeNotifier {
   Future<bool> init() async {
     if (_disposed) return false;
     _available = false;
-    _selectedLanguage = '';
-    _engineName = '系统默认';
-    _languageCount = 0;
     _lastError = '';
 
-    var languages = const <String>[];
+    var ok = false;
     try {
-      final rawLanguages = await _tts.getLanguages;
-      if (rawLanguages is List) {
-        languages = rawLanguages
-            .map((value) => value.toString())
-            .where((value) => value.trim().isNotEmpty)
-            .toList(growable: false);
-      }
+      ok = await _engine.init();
     } catch (error) {
-      _lastError = '读取语言列表失败：$error';
+      _lastError = '初始化语音引擎失败：$error';
     }
-    _languageCount = languages.length;
+    if (_disposed) return false;
 
-    var engines = const <String>[];
-    try {
-      final rawEngines = await _tts.getEngines;
-      if (rawEngines is List) {
-        engines = rawEngines
-            .map((value) => value.toString())
-            .where((value) => value.trim().isNotEmpty)
-            .toList(growable: false);
-      }
-    } catch (_) {
-      // 引擎列表失败不影响语言探测。
-    }
-
-    try {
-      final defaultEngine = await _tts.getDefaultEngine;
-      if (defaultEngine is String && defaultEngine.trim().isNotEmpty) {
-        _engineName = defaultEngine.trim();
-      } else if (engines.isNotEmpty) {
-        _engineName = engines.first;
-      }
-    } catch (_) {
-      if (engines.isNotEmpty) _engineName = engines.first;
-    }
-
-    var selected = '';
-    final candidates = _listedChineseCandidates(languages);
-    for (final candidate in candidates) {
-      if (await _trySetLanguage(candidate)) {
-        selected = candidate;
-        break;
-      }
-    }
-
-    if (selected.isEmpty) {
-      for (final probe in const ['zh-CN', 'zh-TW', 'zh-HK', 'zh']) {
-        var permitted = true;
-        try {
-          final available = await _tts.isLanguageAvailable(probe);
-          permitted = available != false && available != 0;
-        } catch (_) {
-          // 可用性探测失败时仍直接尝试 setLanguage。
-        }
-        if (!permitted) continue;
-        if (await _trySetLanguage(probe)) {
-          selected = probe;
-          break;
-        }
-      }
-    }
-
-    if (selected.isEmpty) {
-      _selectedLanguage = '';
-      _available = false;
-      _lastError = _lastError.isEmpty ? '系统未安装中文语音' : _lastError;
-      _notify();
-      return false;
-    }
-
-    _selectedLanguage = selected;
-    _available = true;
-    _lastError = '';
-    try {
-      await _tts.setSpeechRate(_rate);
-    } catch (_) {
-      // 语速设置失败不影响可用性。
-    }
-    try {
-      await _tts.awaitSpeakCompletion(true);
-    } catch (_) {
-      // 某些平台不支持等待朗读完成，看门狗仍可兜底。
+    _available = ok;
+    if (ok) {
+      _lastError = '';
+    } else {
+      final reason = _engine.lastError.trim();
+      _lastError = reason.isEmpty
+          ? (_lastError.isEmpty ? '语音引擎不可用' : _lastError)
+          : reason;
     }
     _notify();
-    return true;
-  }
-
-  Future<bool> _trySetLanguage(String tag) async {
-    try {
-      return _platformOk(await _tts.setLanguage(tag), nullIsSuccess: false);
-    } catch (_) {
-      return false;
-    }
-  }
-
-  /// `flutter_tts` 的平台方法返回值约定不统一：成功可能是 `1` 或 `true`，
-  /// 失败可能是 `0`、`'0'` 或 `false`，部分平台还会返回 `null`。
-  ///
-  /// 这里用同一个谓词判定成败，`null` 的含义由调用方显式指定：
-  /// `setLanguage` 的 `null` 视为失败，`speak` 的 `null` 视为已开始。
-  bool _platformOk(Object? result, {required bool nullIsSuccess}) {
-    if (result == null) return nullIsSuccess;
-    return result != false && result != 0 && result != '0';
-  }
-
-  List<String> _listedChineseCandidates(List<String> languages) {
-    final normalized = languages
-        .map(normalizeLanguageTag)
-        .where((tag) => tag.isNotEmpty)
-        .toList(growable: false);
-    final candidates = <String>[];
-    void add(String tag) {
-      final lower = tag.toLowerCase();
-      if (!candidates.any((candidate) => candidate.toLowerCase() == lower)) {
-        candidates.add(tag);
-      }
-    }
-
-    for (final tag in normalized) {
-      if (tag.toLowerCase() == 'zh-cn') add(tag);
-    }
-    for (final tag in normalized) {
-      if (tag.toLowerCase().startsWith('zh-hans')) add(tag);
-    }
-    for (final tag in normalized) {
-      if (tag.toLowerCase().startsWith('zh-')) add(tag);
-    }
-    return candidates;
+    return ok;
   }
 
   Future<void> play(List<KnowledgeItem> items) async {
@@ -355,7 +215,8 @@ class TtsService extends ChangeNotifier {
   Future<bool> preview() async {
     if (_disposed) return false;
     if (!_available) {
-      _lastError = '系统未安装中文语音';
+      final reason = _engine.lastError.trim();
+      _lastError = reason.isEmpty ? '语音引擎不可用' : reason;
       _notify();
       return false;
     }
@@ -375,12 +236,27 @@ class TtsService extends ChangeNotifier {
     if (_disposed) return;
     _rate = value;
     _notify();
-    try {
-      await _tts.setSpeechRate(value);
-    } catch (error) {
-      _lastError = '设置语速失败：$error';
+    await _engine.setRate(value);
+    if (_disposed) return;
+    final reason = _engine.lastError.trim();
+    if (reason.isNotEmpty) {
+      _lastError = reason;
       _notify();
     }
+  }
+
+  /// 题干与结论之间的停顿。修改后下一次停顿立即采用新值。
+  void setPromptPause(Duration value) {
+    if (_disposed) return;
+    _promptPause = _nonNegative(value);
+    _notify();
+  }
+
+  /// 结论与下一条之间的停顿。
+  void setAnswerPause(Duration value) {
+    if (_disposed) return;
+    _answerPause = _nonNegative(value);
+    _notify();
   }
 
   void toggleLoop() {
@@ -406,7 +282,7 @@ class TtsService extends ChangeNotifier {
         _consecutiveFailures++;
         if (_consecutiveFailures >= ttsFailureThreshold) {
           _degraded = true;
-          _lastError = '语音引擎无响应';
+          if (_lastError.trim().isEmpty) _lastError = '语音引擎无响应';
           _playing = false;
           _notify();
           await _stopPlayback();
@@ -450,7 +326,11 @@ class TtsService extends ChangeNotifier {
     if (!_isCurrent(generation) || text.isEmpty) return false;
     final barrier = _stopBarrier;
     if (barrier != null) {
-      await barrier;
+      try {
+        await barrier;
+      } catch (_) {
+        // 停止阶段的错误已由引擎收敛，不应阻断下一次朗读。
+      }
       if (!_isCurrent(generation)) return false;
     }
 
@@ -489,31 +369,21 @@ class TtsService extends ChangeNotifier {
     Completer<_SpeakResult> completer,
   ) async {
     try {
-      final result = await _tts.speak(text);
+      final ok = await _engine.speak(text);
       if (completer.isCompleted) return;
-      if (!_platformOk(result, nullIsSuccess: true)) {
-        completer.complete(const _SpeakResult(_SpeakKind.failure, '朗读未开始'));
-      } else {
+      if (ok) {
         completer.complete(const _SpeakResult(_SpeakKind.completed));
+      } else {
+        final reason = _engine.lastError.trim();
+        completer.complete(
+          _SpeakResult(_SpeakKind.failure, reason.isEmpty ? '朗读未开始' : reason),
+        );
       }
     } catch (error) {
       if (!completer.isCompleted) {
         completer.complete(_SpeakResult(_SpeakKind.failure, '朗读失败：$error'));
       }
     }
-  }
-
-  void _handlePlatformError(dynamic message) {
-    if (_disposed) return;
-    final text = message?.toString().trim() ?? '';
-    final error = text.isEmpty ? '语音引擎报错' : text;
-    final pending = _pending;
-    if (pending != null && !pending.isCompleted) {
-      pending.complete(_SpeakResult(_SpeakKind.failure, error));
-      return;
-    }
-    _lastError = error;
-    _notify();
   }
 
   /// 开始一次新的播放会话：递增代次（令旧循环失效）、结束悬挂的 utterance
@@ -538,16 +408,8 @@ class TtsService extends ChangeNotifier {
     }
   }
 
-  Future<void> _safeStop() async {
-    try {
-      await _tts.stop();
-    } catch (_) {
-      // 停止失败不影响后续状态收敛。
-    }
-  }
-
   Future<void> _stopPlayback() {
-    final pending = _safeStop();
+    final pending = _engine.stop();
     _stopBarrier = pending;
     pending.whenComplete(() {
       if (identical(_stopBarrier, pending)) _stopBarrier = null;
@@ -561,6 +423,10 @@ class TtsService extends ChangeNotifier {
     if (!_disposed) notifyListeners();
   }
 
+  static Duration _nonNegative(Duration value) {
+    return value < Duration.zero ? Duration.zero : value;
+  }
+
   @override
   void dispose() {
     if (_disposed) return;
@@ -568,7 +434,7 @@ class TtsService extends ChangeNotifier {
     _generation++;
     _playing = false;
     _cancelPending();
-    unawaited(_stopPlayback());
+    unawaited(_engine.dispose().catchError((_) {}));
     super.dispose();
   }
 }

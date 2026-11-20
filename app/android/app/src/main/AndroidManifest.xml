@@ -1,4 +1,6 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <!-- 可选的 DeepSeek 云语音需要网络；系统语音仍完全离线。 -->
+    <uses-permission android:name="android.permission.INTERNET"/>
     <application
         android:label="一页纸"
         android:name="${applicationName}"
