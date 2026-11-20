@@ -6,6 +6,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import '../models/exam_record.dart';
 import '../models/knowledge_item.dart';
+import '../models/sheet_path.dart';
 import 'md_parser_service.dart';
 
 class StorageException implements Exception {
@@ -24,6 +25,7 @@ class StorageService {
 
   static const _itemsFile = 'knowledge_items.json';
   static const _recordsFile = 'exam_records.json';
+  static const _sheetPathKey = 'sheetPath';
   static const _schemaVersion = 1;
 
   Future<Directory> _directory() async {
@@ -113,6 +115,28 @@ class StorageService {
     });
   }
 
+  SheetPath? loadSheetPath() {
+    final raw = prefs.getString(_sheetPathKey);
+    if (raw == null || raw.isEmpty) return null;
+    try {
+      final decoded = jsonDecode(raw);
+      if (decoded is Map) {
+        return SheetPath.fromJson(Map<String, dynamic>.from(decoded));
+      }
+    } catch (_) {
+      // 路径只是导航状态；损坏时回到全部，不影响条目数据。
+    }
+    return null;
+  }
+
+  Future<void> saveSheetPath(SheetPath path) async {
+    await prefs.setString(_sheetPathKey, jsonEncode(path.toJson()));
+  }
+
+  Future<void> clearSheetPath() async {
+    await prefs.remove(_sheetPathKey);
+  }
+
   Future<List<KnowledgeItem>> loadSeed(
     String seedText,
     MdParserService parser,
@@ -149,6 +173,7 @@ class StorageService {
   }
 
   Future<void> clearAll() async {
+    await prefs.remove(_sheetPathKey);
     for (final name in const [_itemsFile, _recordsFile]) {
       final file = await _file(name);
       if (await file.exists()) await file.delete();

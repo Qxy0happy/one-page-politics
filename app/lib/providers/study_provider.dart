@@ -1,9 +1,13 @@
+import 'dart:async';
+
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 
 import '../models/knowledge_item.dart';
+import '../models/sheet_path.dart';
 import '../services/md_parser_service.dart';
 import '../services/merge_service.dart';
+import '../services/sheet_tree_service.dart';
 import '../services/storage_service.dart';
 
 class StudyProvider extends ChangeNotifier {
@@ -13,10 +17,11 @@ class StudyProvider extends ChangeNotifier {
   final MdParserService parser;
 
   List<KnowledgeItem> _items = const [];
+  Map<String, String>? _haystacks;
   bool _loading = true;
   String? _error;
 
-  Subject? _subject;
+  SheetPath _path = SheetPath.root;
   StatusFilter _statusFilter = StatusFilter.all;
   String _query = '';
   bool _maskMode = false;
@@ -25,7 +30,8 @@ class StudyProvider extends ChangeNotifier {
   List<KnowledgeItem> get items => _items;
   bool get loading => _loading;
   String? get error => _error;
-  Subject? get subject => _subject;
+  SheetPath get path => _path;
+  String get pathLabel => _path.label;
   StatusFilter get statusFilter => _statusFilter;
   String get query => _query;
   bool get maskMode => _maskMode;
@@ -33,56 +39,66 @@ class StudyProvider extends ChangeNotifier {
   List<KnowledgeItem> get filteredItems {
     final query = _query.trim().toLowerCase();
     return _items
-        .where((item) {
-          if (_subject != null && item.subject != _subject) return false;
-          switch (_statusFilter) {
-            case StatusFilter.all:
-              break;
-            case StatusFilter.starred:
-              if (!item.isStarred) return false;
-              break;
-            case StatusFilter.fuzzy:
-              if (item.status != StudyStatus.fuzzy) return false;
-              break;
-            case StatusFilter.round2:
-              if (!item.isRound2Focus) return false;
-              break;
-          }
-          if (query.isEmpty) return true;
-          final haystack = [
-            item.prompt,
-            item.answer,
-            item.explanation,
-            item.mnemonic,
-            item.sourceNote,
-            item.userNote,
-            item.tombstoneWords.join(' '),
-          ].join(' ').toLowerCase();
-          return haystack.contains(query);
-        })
+        .where(
+          (item) =>
+              _path.matches(item) &&
+              _matchesStatus(item) &&
+              _matchesQuery(item, query),
+        )
         .toList(growable: false);
   }
 
-  Map<Subject, int> get subjectCounts {
-    final counts = {for (final subject in Subject.values) subject: 0};
+  /// 状态芯片的分面计数：当前路径 + 搜索词，不含状态本身。
+  Map<StatusFilter, int> get statusCounts {
+    final query = _query.trim().toLowerCase();
+    var all = 0;
+    var starred = 0;
+    var fuzzy = 0;
+    var round2 = 0;
     for (final item in _items) {
-      counts[item.subject] = (counts[item.subject] ?? 0) + 1;
+      if (!_path.matches(item) || !_matchesQuery(item, query)) continue;
+      all++;
+      if (item.isStarred) starred++;
+      if (item.status == StudyStatus.fuzzy) fuzzy++;
+      if (item.isRound2Focus) round2++;
     }
-    return counts;
+    return {
+      StatusFilter.all: all,
+      StatusFilter.starred: starred,
+      StatusFilter.fuzzy: fuzzy,
+      StatusFilter.round2: round2,
+    };
   }
 
-  Map<CardType, int> get typeCounts {
-    final counts = {for (final type in CardType.values) type: 0};
-    for (final item in _items) {
-      counts[item.cardType] = (counts[item.cardType] ?? 0) + 1;
-    }
-    return counts;
-  }
+  SheetNode get sheetTree => buildSheetTree(_items);
 
   int get fuzzyCount =>
       _items.where((item) => item.status == StudyStatus.fuzzy).length;
 
   int get starredCount => _items.where((item) => item.isStarred).length;
+
+  bool _matchesStatus(KnowledgeItem item) => switch (_statusFilter) {
+    StatusFilter.all => true,
+    StatusFilter.starred => item.isStarred,
+    StatusFilter.fuzzy => item.status == StudyStatus.fuzzy,
+    StatusFilter.round2 => item.isRound2Focus,
+  };
+
+  Map<String, String> get _searchIndex =>
+      _haystacks ??= {for (final item in _items) item.id: _haystack(item)};
+
+  bool _matchesQuery(KnowledgeItem item, String query) =>
+      query.isEmpty || (_searchIndex[item.id] ?? '').contains(query);
+
+  static String _haystack(KnowledgeItem item) => [
+    item.prompt,
+    item.answer,
+    item.explanation,
+    item.mnemonic,
+    item.sourceNote,
+    item.userNote,
+    item.tombstoneWords.join(' '),
+  ].join(' ').toLowerCase();
 
   Future<void> load() async {
     _loading = true;
@@ -91,11 +107,12 @@ class StudyProvider extends ChangeNotifier {
     try {
       final saved = await storage.loadItems();
       if (saved != null && saved.isNotEmpty) {
-        _items = saved;
+        _setItems(saved);
       } else {
         final seed = await rootBundle.loadString('assets/default_sheet.md');
-        _items = await storage.loadSeed(seed, parser);
+        _setItems(await storage.loadSeed(seed, parser));
       }
+      _path = _validPath(storage.loadSheetPath());
     } catch (error) {
       _error = error.toString();
     }
@@ -103,10 +120,13 @@ class StudyProvider extends ChangeNotifier {
     notifyListeners();
   }
 
-  void setSubject(Subject? value) {
-    _subject = value;
+  Future<void> setPath(SheetPath value) async {
+    final next = _validPath(value);
+    if (next == _path) return;
+    _path = next;
     _revealed.clear();
     notifyListeners();
+    await _persistPath();
   }
 
   void setStatusFilter(StatusFilter value) {
@@ -116,6 +136,7 @@ class StudyProvider extends ChangeNotifier {
   }
 
   void setQuery(String value) {
+    if (value == _query) return;
     _query = value;
     notifyListeners();
   }
@@ -192,7 +213,7 @@ class StudyProvider extends ChangeNotifier {
         })
         .toList(growable: false);
     if (!changed) return;
-    _items = next;
+    _setItems(next);
     notifyListeners();
     await _persist();
   }
@@ -206,7 +227,8 @@ class StudyProvider extends ChangeNotifier {
       incoming,
       overrideLocalEdits: overrideLocalEdits,
     );
-    _items = result.items;
+    _setItems(result.items);
+    _revalidatePath();
     notifyListeners();
     await _persist();
     return result;
@@ -219,18 +241,21 @@ class StudyProvider extends ChangeNotifier {
       throw StorageException('内置一页纸解析失败：${parsed.errors.take(3).join('；')}');
     }
     final oldById = {for (final item in _items) item.id: item};
-    _items = parsed.items
-        .map((seed) {
-          final old = oldById[seed.id];
-          if (old == null) return seed;
-          return seed.copyWith(
-            status: old.status,
-            isStarred: old.isStarred,
-            reviewCount: old.reviewCount,
-            userNote: old.userNote,
-          );
-        })
-        .toList(growable: false);
+    _setItems(
+      parsed.items
+          .map((seed) {
+            final old = oldById[seed.id];
+            if (old == null) return seed;
+            return seed.copyWith(
+              status: old.status,
+              isStarred: old.isStarred,
+              reviewCount: old.reviewCount,
+              userNote: old.userNote,
+            );
+          })
+          .toList(growable: false),
+    );
+    _revalidatePath();
     notifyListeners();
     await _persist();
   }
@@ -242,8 +267,8 @@ class StudyProvider extends ChangeNotifier {
     if (!parsed.isValid) {
       throw StorageException('内置一页纸解析失败：${parsed.errors.take(3).join('；')}');
     }
-    _items = parsed.items;
-    _subject = null;
+    _setItems(parsed.items);
+    _path = SheetPath.root;
     _statusFilter = StatusFilter.all;
     _query = '';
     _maskMode = false;
@@ -252,10 +277,47 @@ class StudyProvider extends ChangeNotifier {
     await _persist();
   }
 
+  SheetPath _validPath(SheetPath? path) {
+    if (path == null || path.subject == null) return SheetPath.root;
+    final subject = path.subject!;
+    if (!_items.any((item) => item.subject == subject)) {
+      return SheetPath.root;
+    }
+    if (path.chapter == null) return SheetPath(subject: subject);
+    final chapter = path.chapter!;
+    final chapterExists = _items.any(
+      (item) => item.subject == subject && item.chapter == chapter,
+    );
+    if (!chapterExists) return SheetPath(subject: subject);
+    if (path.cardType == null) {
+      return SheetPath(subject: subject, chapter: chapter);
+    }
+    final typeExists = _items.any(
+      (item) =>
+          item.subject == subject &&
+          item.chapter == chapter &&
+          item.cardType == path.cardType,
+    );
+    if (!typeExists) return SheetPath(subject: subject, chapter: chapter);
+    return path;
+  }
+
+  void _revalidatePath() {
+    final next = _validPath(_path);
+    if (next == _path) return;
+    _path = next;
+    unawaited(_persistPath());
+  }
+
+  void _setItems(List<KnowledgeItem> items) {
+    _items = items;
+    _haystacks = null;
+  }
+
   void _replace(int index, KnowledgeItem item) {
     final next = List<KnowledgeItem>.of(_items);
     next[index] = item;
-    _items = next;
+    _setItems(next);
     notifyListeners();
   }
 
@@ -266,6 +328,14 @@ class StudyProvider extends ChangeNotifier {
     } catch (error) {
       _error = '保存失败：$error';
       notifyListeners();
+    }
+  }
+
+  Future<void> _persistPath() async {
+    try {
+      await storage.saveSheetPath(_path);
+    } catch (_) {
+      // 路径只是导航状态；保存失败不阻断条目与进度。
     }
   }
 }

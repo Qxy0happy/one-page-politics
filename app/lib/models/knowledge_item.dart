@@ -1,3 +1,6 @@
+/// Markdown 中没有二级标题时使用的章节名。
+const String kUnchaptered = '未分章';
+
 enum Subject { mayuan, shigang, sixiu, xinsixiang, shizheng }
 
 const Map<String, Subject> subjectAliases = {
@@ -175,7 +178,7 @@ class KnowledgeItem {
     return KnowledgeItem(
       id: json['id'] as String? ?? '',
       subject: _enumByName(Subject.values, json['subject'], Subject.mayuan),
-      chapter: json['chapter'] as String? ?? '未分章',
+      chapter: json['chapter'] as String? ?? kUnchaptered,
       cardType: _enumByName(
         CardType.values,
         json['cardType'],

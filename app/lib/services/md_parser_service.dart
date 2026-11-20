@@ -15,7 +15,7 @@ class MdParserService {
   ParseResult parse(String text) {
     final result = ParseResult();
     Subject? subject;
-    var chapter = '未分章';
+    var chapter = kUnchaptered;
     final seenIds = <String>{};
 
     final lines = text.split('\n');
@@ -26,7 +26,7 @@ class MdParserService {
 
       if (line.startsWith('## ')) {
         final value = line.substring(3).trim();
-        chapter = value.isEmpty ? '未分章' : value;
+        chapter = value.isEmpty ? kUnchaptered : value;
         continue;
       }
       if (line.startsWith('# ')) {
@@ -41,7 +41,7 @@ class MdParserService {
         } else {
           subject = matches.first;
         }
-        chapter = '未分章';
+        chapter = kUnchaptered;
         continue;
       }
       if (!line.startsWith('- ')) {

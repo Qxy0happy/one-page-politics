@@ -1,10 +1,14 @@
+import 'dart:async';
+
 import 'package:material_ui/material_ui.dart';
 import 'package:provider/provider.dart';
 
 import '../models/knowledge_item.dart';
+import '../models/sheet_path.dart';
 import '../providers/study_provider.dart';
 import '../providers/theme_controller.dart';
 import '../widgets/item_card.dart';
+import '../widgets/path_tree_sheet.dart';
 import '../widgets/tts_sheet.dart';
 
 class Tab1SheetPage extends StatefulWidget {
@@ -16,10 +20,12 @@ class Tab1SheetPage extends StatefulWidget {
 
 class _Tab1SheetPageState extends State<Tab1SheetPage> {
   final _search = TextEditingController();
+  Timer? _searchTimer;
   var _searchOpen = false;
 
   @override
   void dispose() {
+    _searchTimer?.cancel();
     _search.dispose();
     super.dispose();
   }
@@ -78,13 +84,7 @@ class _Tab1SheetPageState extends State<Tab1SheetPage> {
                         ),
                         IconButton(
                           tooltip: '搜索',
-                          onPressed: () {
-                            setState(() => _searchOpen = !_searchOpen);
-                            if (!_searchOpen) {
-                              _search.clear();
-                              study.setQuery('');
-                            }
-                          },
+                          onPressed: () => _toggleSearch(study),
                           icon: Icon(
                             _searchOpen ? Icons.search_off : Icons.search,
                           ),
@@ -98,17 +98,17 @@ class _Tab1SheetPageState extends State<Tab1SheetPage> {
                           child: TextField(
                             controller: _search,
                             autofocus: true,
-                            onChanged: study.setQuery,
+                            onChanged: (value) =>
+                                _onSearchChanged(study, value),
                             decoration: InputDecoration(
-                              hintText: '搜索题干、结论、口诀、备注',
+                              hintText: study.path.isRoot
+                                  ? '搜索题干、结论、口诀、备注'
+                                  : '在 ${study.pathLabel} 中搜索',
                               prefixIcon: const Icon(Icons.search),
                               suffixIcon: _search.text.isEmpty
                                   ? null
                                   : IconButton(
-                                      onPressed: () {
-                                        _search.clear();
-                                        study.setQuery('');
-                                      },
+                                      onPressed: () => _clearSearch(study),
                                       icon: const Icon(Icons.close),
                                     ),
                               border: OutlineInputBorder(
@@ -144,6 +144,52 @@ class _Tab1SheetPageState extends State<Tab1SheetPage> {
     );
   }
 
+  void _toggleSearch(StudyProvider study) {
+    if (_searchOpen) {
+      _closeSearch(study);
+    } else {
+      setState(() => _searchOpen = true);
+    }
+  }
+
+  void _onSearchChanged(StudyProvider study, String value) {
+    _searchTimer?.cancel();
+    _searchTimer = Timer(
+      const Duration(milliseconds: 200),
+      () => study.setQuery(value),
+    );
+    setState(() {});
+  }
+
+  void _clearSearch(StudyProvider study) {
+    _searchTimer?.cancel();
+    _search.clear();
+    study.setQuery('');
+    setState(() {});
+  }
+
+  void _closeSearch(StudyProvider study) {
+    _searchTimer?.cancel();
+    _search.clear();
+    study.setQuery('');
+    setState(() => _searchOpen = false);
+  }
+
+  Future<void> _openPathTree(StudyProvider study) async {
+    final selected = await showModalBottomSheet<SheetPath>(
+      context: context,
+      isScrollControlled: true,
+      useSafeArea: true,
+      showDragHandle: true,
+      builder: (_) => FractionallySizedBox(
+        heightFactor: 0.82,
+        child: PathTreeSheet(tree: study.sheetTree, current: study.path),
+      ),
+    );
+    if (!mounted || selected == null) return;
+    await study.setPath(selected);
+  }
+
   void _openTts(StudyProvider study) {
     final items = study.filteredItems;
     if (items.isEmpty) {
@@ -161,29 +207,13 @@ class _Tab1SheetPageState extends State<Tab1SheetPage> {
 
   Widget _filters(StudyProvider study) {
     final theme = Theme.of(context);
-    final round2 = study.items.where((item) => item.isRound2Focus).length;
+    final counts = study.statusCounts;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        SingleChildScrollView(
-          scrollDirection: Axis.horizontal,
-          padding: const EdgeInsets.fromLTRB(16, 4, 16, 6),
-          child: Row(
-            children: [
-              _chip(
-                label: '全部',
-                selected: study.subject == null,
-                onTap: () => study.setSubject(null),
-              ),
-              for (final subject in Subject.values)
-                _chip(
-                  label:
-                      '${subject.label} ${study.subjectCounts[subject] ?? 0}',
-                  selected: study.subject == subject,
-                  onTap: () => study.setSubject(subject),
-                ),
-            ],
-          ),
+        Padding(
+          padding: const EdgeInsets.fromLTRB(16, 4, 16, 8),
+          child: _pathBar(study),
         ),
         SingleChildScrollView(
           scrollDirection: Axis.horizontal,
@@ -194,25 +224,25 @@ class _Tab1SheetPageState extends State<Tab1SheetPage> {
                 study,
                 label: '全量',
                 value: StatusFilter.all,
-                count: study.items.length,
+                count: counts[StatusFilter.all] ?? 0,
               ),
               _statusChip(
                 study,
                 label: '仅标星',
                 value: StatusFilter.starred,
-                count: study.starredCount,
+                count: counts[StatusFilter.starred] ?? 0,
               ),
               _statusChip(
                 study,
                 label: '仅模糊',
                 value: StatusFilter.fuzzy,
-                count: study.fuzzyCount,
+                count: counts[StatusFilter.fuzzy] ?? 0,
               ),
               _statusChip(
                 study,
                 label: '二轮冲刺',
                 value: StatusFilter.round2,
-                count: round2,
+                count: counts[StatusFilter.round2] ?? 0,
               ),
             ],
           ),
@@ -236,18 +266,58 @@ class _Tab1SheetPageState extends State<Tab1SheetPage> {
     );
   }
 
-  Widget _chip({
-    required String label,
-    required bool selected,
-    required VoidCallback onTap,
-  }) {
-    return Padding(
-      padding: const EdgeInsets.only(right: 8),
-      child: ChoiceChip(
-        label: Text(label),
-        selected: selected,
-        showCheckmark: false,
-        onSelected: (_) => onTap(),
+  Widget _pathBar(StudyProvider study) {
+    final theme = Theme.of(context);
+    return Material(
+      key: const Key('sheetPathBar'),
+      color: theme.colorScheme.surfaceContainerHighest,
+      clipBehavior: Clip.antiAlias,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(14),
+        side: BorderSide(
+          color: theme.colorScheme.outlineVariant.withValues(alpha: 0.6),
+        ),
+      ),
+      child: InkWell(
+        onTap: () => _openPathTree(study),
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(12, 10, 6, 10),
+          child: Row(
+            children: [
+              Icon(
+                Icons.account_tree_outlined,
+                size: 20,
+                color: theme.colorScheme.primary,
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Text(
+                  study.pathLabel,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: theme.textTheme.titleMedium,
+                ),
+              ),
+              if (!study.path.isRoot)
+                IconButton(
+                  tooltip: '回到全部',
+                  visualDensity: VisualDensity.compact,
+                  padding: EdgeInsets.zero,
+                  constraints: const BoxConstraints(
+                    minWidth: 32,
+                    minHeight: 32,
+                  ),
+                  onPressed: () => study.setPath(SheetPath.root),
+                  icon: Icon(
+                    Icons.close,
+                    size: 18,
+                    color: theme.textTheme.bodySmall?.color,
+                  ),
+                ),
+              Icon(Icons.expand_more, color: theme.textTheme.bodySmall?.color),
+            ],
+          ),
+        ),
       ),
     );
   }
@@ -271,10 +341,11 @@ class _Tab1SheetPageState extends State<Tab1SheetPage> {
 
   Widget _emptyView(StudyProvider study) {
     final theme = Theme.of(context);
-    final hasFilter =
-        study.subject != null ||
-        study.statusFilter != StatusFilter.all ||
-        study.query.trim().isNotEmpty;
+    final query = study.query.trim();
+    final hasQuery = query.isNotEmpty;
+    final hasPath = !study.path.isRoot;
+    final hasStatus = study.statusFilter != StatusFilter.all;
+    final hasFilter = hasQuery || hasPath || hasStatus;
     return Padding(
       padding: const EdgeInsets.all(32),
       child: Column(
@@ -293,10 +364,44 @@ class _Tab1SheetPageState extends State<Tab1SheetPage> {
           ),
           const SizedBox(height: 6),
           Text(
-            hasFilter ? '试试切换科目、状态或清除搜索。' : '请到作战室导入 .md，或恢复内置一页纸。',
+            hasQuery
+                ? '「$query」在 ${hasPath ? study.pathLabel : "全部路径"} 中没有命中。'
+                : hasFilter
+                ? '试试切换路径、状态或清除搜索。'
+                : '请到作战室导入 .md，或恢复内置一页纸。',
             style: theme.textTheme.bodySmall,
             textAlign: TextAlign.center,
           ),
+          if (hasFilter) ...[
+            const SizedBox(height: 12),
+            Wrap(
+              alignment: WrapAlignment.center,
+              spacing: 8,
+              runSpacing: 4,
+              children: [
+                if (hasQuery && hasPath)
+                  FilledButton.tonal(
+                    onPressed: () => study.setPath(SheetPath.root),
+                    child: const Text('在全部中搜索'),
+                  ),
+                if (hasQuery)
+                  TextButton(
+                    onPressed: () => _clearSearch(study),
+                    child: const Text('清除搜索'),
+                  ),
+                if (!hasQuery && hasPath)
+                  TextButton(
+                    onPressed: () => study.setPath(SheetPath.root),
+                    child: const Text('回到全部路径'),
+                  ),
+                if (!hasQuery && hasStatus)
+                  TextButton(
+                    onPressed: () => study.setStatusFilter(StatusFilter.all),
+                    child: const Text('清除状态筛选'),
+                  ),
+              ],
+            ),
+          ],
         ],
       ),
     );
