@@ -1,0 +1,51 @@
+# Local CI toolchain and runner caches
+.ci-toolchain/
+.wrkflw/
+
+# Flutter / Dart build output
+.dart_tool/
+**/.dart_tool/
+build/
+**/build/
+.flutter-plugins
+.flutter-plugins-dependencies
+.packages
+.pub-cache/
+coverage/
+lcov.info
+
+# Android / Gradle local state
+.gradle/
+**/.gradle/
+**/local.properties
+**/key.properties
+**/GeneratedPluginRegistrant.java
+**/.cxx/
+*.jks
+*.keystore
+*.apk
+*.aab
+*.ap_
+*.dex
+*.class
+
+# IDE and editor files
+.idea/
+.vscode/
+*.iml
+*.ipr
+*.iws
+*.swp
+*.swo
+*~
+
+# OS metadata
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Logs and local environment
+*.log
+.env
+.env.*
+*.local

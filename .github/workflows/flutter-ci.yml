@@ -1,0 +1,203 @@
+name: Flutter reusable CI
+
+on:
+  workflow_call:
+    inputs:
+      flutter-version:
+        description: Flutter SDK version
+        required: true
+        type: string
+      java-version:
+        description: Temurin JDK major version
+        required: true
+        type: string
+      android-compile-sdk:
+        description: Android compileSdk / platform version
+        required: true
+        type: string
+      android-build-tools:
+        description: Android build-tools version
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  ci:
+    name: Analyze, test, build release APK
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      FLUTTER_VERSION: ${{ inputs.flutter-version }}
+      JAVA_VERSION: ${{ inputs.java-version }}
+      ANDROID_COMPILE_SDK: ${{ inputs.android-compile-sdk }}
+      ANDROID_BUILD_TOOLS: ${{ inputs.android-build-tools }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Prepare cache directories
+        shell: bash
+        run: mkdir -p .ci-toolchain/toolchain .ci-toolchain/deps
+
+      - name: Restore toolchain cache
+        uses: actions/cache@v4
+        with:
+          path: .ci-toolchain/toolchain
+          key: ci-toolchain-${{ runner.os }}-flutter-${{ inputs.flutter-version }}-jdk-${{ inputs.java-version }}-android-${{ inputs.android-compile-sdk }}-${{ inputs.android-build-tools }}
+          restore-keys: |
+            ci-toolchain-${{ runner.os }}-flutter-${{ inputs.flutter-version }}-
+
+      - name: Restore dependency cache
+        uses: actions/cache@v4
+        with:
+          path: .ci-toolchain/deps
+          key: ci-deps-${{ runner.os }}-${{ hashFiles('app/pubspec.lock', 'app/android/gradle/wrapper/gradle-wrapper.properties') }}
+          restore-keys: |
+            ci-deps-${{ runner.os }}-
+
+      - name: Prepare base tools
+        shell: bash
+        run: |
+          set -euo pipefail
+          export DEBIAN_FRONTEND=noninteractive
+          if [ "$(id -u)" -eq 0 ]; then
+            SUDO=""
+          else
+            SUDO="sudo"
+          fi
+          $SUDO apt-get update
+          $SUDO apt-get install -y --no-install-recommends \
+            ca-certificates curl git unzip xz-utils zip
+
+      - name: Install or reuse JDK, Flutter and Android SDK
+        shell: bash
+        run: |
+          set -euo pipefail
+          ROOT="${GITHUB_WORKSPACE:-$PWD}/.ci-toolchain"
+          TOOLCHAIN="$ROOT/toolchain"
+          DEPS="$ROOT/deps"
+          mkdir -p "$TOOLCHAIN" "$DEPS"
+          export JAVA_HOME="$TOOLCHAIN/jdk25"
+          export FLUTTER_HOME="$TOOLCHAIN/flutter"
+          export ANDROID_HOME="$TOOLCHAIN/android-sdk"
+          export ANDROID_SDK_ROOT="$ANDROID_HOME"
+          export PUB_CACHE="$DEPS/pub-cache"
+          export GRADLE_USER_HOME="$DEPS/gradle"
+          mkdir -p "$JAVA_HOME" "$FLUTTER_HOME" "$ANDROID_HOME" "$PUB_CACHE" "$GRADLE_USER_HOME"
+
+          if [ -x "$JAVA_HOME/bin/java" ]; then
+            echo "toolchain: reuse JDK ${JAVA_VERSION}"
+          else
+            echo "toolchain: install JDK ${JAVA_VERSION}"
+            curl -fsSL -o /tmp/jdk.tar.gz \
+              "https://api.adoptium.net/v3/binary/latest/${JAVA_VERSION}/ga/linux/x64/jdk/hotspot/normal/eclipse"
+            tar -xzf /tmp/jdk.tar.gz -C "$JAVA_HOME" --strip-components=1
+          fi
+
+          if [ -x "$FLUTTER_HOME/bin/flutter" ]; then
+            echo "toolchain: reuse Flutter ${FLUTTER_VERSION}"
+          else
+            echo "toolchain: install Flutter ${FLUTTER_VERSION}"
+            curl -fsSL -o /tmp/flutter.tar.xz \
+              "https://storage.googleapis.com/flutter_infra_release/releases/stable/linux/flutter_linux_${FLUTTER_VERSION}-stable.tar.xz"
+            tar -xJf /tmp/flutter.tar.xz -C "$TOOLCHAIN"
+          fi
+
+          if [ -x "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" ]; then
+            echo "toolchain: reuse Android cmdline-tools"
+          else
+            echo "toolchain: install Android cmdline-tools"
+            mkdir -p "$ANDROID_HOME/cmdline-tools"
+            curl -fsSL -o /tmp/cmdline-tools.zip \
+              "https://dl.google.com/android/repository/commandlinetools-linux-11076708_latest.zip"
+            unzip -q /tmp/cmdline-tools.zip -d "$ANDROID_HOME/cmdline-tools"
+            mv "$ANDROID_HOME/cmdline-tools/cmdline-tools" "$ANDROID_HOME/cmdline-tools/latest"
+          fi
+
+          export PATH="$JAVA_HOME/bin:$FLUTTER_HOME/bin:$ANDROID_HOME/cmdline-tools/latest/bin:$PATH"
+          if [ -d "$ANDROID_HOME/platforms/android-${ANDROID_COMPILE_SDK}" ] && \
+             [ -d "$ANDROID_HOME/build-tools/${ANDROID_BUILD_TOOLS}" ]; then
+            echo "toolchain: reuse Android platform/build-tools"
+          else
+            echo "toolchain: install Android SDK packages"
+            yes | sdkmanager --sdk_root="$ANDROID_HOME" --licenses >/dev/null 2>&1 || true
+            sdkmanager --sdk_root="$ANDROID_HOME" \
+              "platform-tools" \
+              "platforms;android-${ANDROID_COMPILE_SDK}" \
+              "build-tools;${ANDROID_BUILD_TOOLS}"
+          fi
+
+          cat > "$ROOT/env.sh" <<'EOF'
+          export TOOLCHAIN_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+          export TOOLCHAIN="${TOOLCHAIN_ROOT}/toolchain"
+          export DEPS="${TOOLCHAIN_ROOT}/deps"
+          export JAVA_HOME="${TOOLCHAIN}/jdk25"
+          export FLUTTER_HOME="${TOOLCHAIN}/flutter"
+          export ANDROID_HOME="${TOOLCHAIN}/android-sdk"
+          export ANDROID_SDK_ROOT="${ANDROID_HOME}"
+          export PUB_CACHE="${DEPS}/pub-cache"
+          export GRADLE_USER_HOME="${DEPS}/gradle"
+          export PATH="${JAVA_HOME}/bin:${FLUTTER_HOME}/bin:${ANDROID_HOME}/platform-tools:${ANDROID_HOME}/cmdline-tools/latest/bin:${PATH}"
+          EOF
+          source "$ROOT/env.sh"
+          git config --global --add safe.directory "$FLUTTER_HOME"
+          flutter config --no-analytics >/dev/null 2>&1 || true
+          java -version
+          flutter --version
+          sdkmanager --version
+
+      - name: Install dependencies
+        shell: bash
+        run: |
+          source "$GITHUB_WORKSPACE/.ci-toolchain/env.sh"
+          cd app
+          flutter pub get
+
+      - name: Analyze
+        shell: bash
+        run: |
+          source "$GITHUB_WORKSPACE/.ci-toolchain/env.sh"
+          cd app
+          flutter analyze
+
+      - name: Test
+        shell: bash
+        run: |
+          source "$GITHUB_WORKSPACE/.ci-toolchain/env.sh"
+          cd app
+          flutter test --reporter expanded
+
+      - name: Build release APK
+        shell: bash
+        run: |
+          source "$GITHUB_WORKSPACE/.ci-toolchain/env.sh"
+          cd app
+          flutter build apk --release
+
+      - name: Verify release APK
+        shell: bash
+        run: |
+          set -euo pipefail
+          source "$GITHUB_WORKSPACE/.ci-toolchain/env.sh"
+          apk=app/build/app/outputs/flutter-apk/app-release.apk
+          test -f "$apk"
+          sha256sum "$apk" | tee /tmp/apk.sha256
+          build_tools="$ANDROID_HOME/build-tools/${ANDROID_BUILD_TOOLS}"
+          "$build_tools/aapt2" dump permissions "$apk" | tee /tmp/permissions.txt
+          if grep -q 'android.permission.INTERNET' /tmp/permissions.txt; then
+            echo "::error::release APK declares android.permission.INTERNET"
+            exit 1
+          fi
+          "$build_tools/aapt2" dump xmltree --file AndroidManifest.xml "$apk" | tee /tmp/manifest.xml
+          grep -q 'TTS_SERVICE' /tmp/manifest.xml
+          "$build_tools/apksigner" verify --print-certs "$apk"
+
+      - name: Upload release APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: one-page-politics-release-apk
+          path: app/build/app/outputs/flutter-apk/app-release.apk
+          if-no-files-found: error
+          retention-days: 14
