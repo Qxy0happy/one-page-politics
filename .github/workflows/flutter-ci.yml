@@ -196,8 +196,13 @@ jobs:
           sha256sum "$apk" | tee /tmp/apk.sha256
           build_tools="$ANDROID_HOME/build-tools/${ANDROID_BUILD_TOOLS}"
           "$build_tools/aapt2" dump permissions "$apk" | tee /tmp/permissions.txt
-          if grep -q 'android.permission.INTERNET' /tmp/permissions.txt; then
-            echo "::error::release APK declares android.permission.INTERNET"
+          # INTERNET is required by the optional DeepSeek backend; storage permissions remain forbidden.
+          if ! grep -q 'android.permission.INTERNET' /tmp/permissions.txt; then
+            echo "::error::release APK must declare INTERNET for optional DeepSeek TTS"
+            exit 1
+          fi
+          if grep -Eq 'android.permission.(READ|WRITE)_EXTERNAL_STORAGE|android.permission.MANAGE_EXTERNAL_STORAGE|android.permission.READ_MEDIA_' /tmp/permissions.txt; then
+            echo "::error::release APK declares an unexpected storage permission"
             exit 1
           fi
           "$build_tools/aapt2" dump xmltree --file AndroidManifest.xml "$apk" | tee /tmp/manifest.xml
