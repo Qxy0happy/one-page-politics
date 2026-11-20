@@ -38,6 +38,7 @@ jobs:
       ANDROID_COMPILE_SDK: ${{ inputs.android-compile-sdk }}
       ANDROID_PLUGIN_SDK: ${{ inputs.android-plugin-sdk }}
       ANDROID_BUILD_TOOLS: ${{ inputs.android-build-tools }}
+      ANDROID_CMAKE_VERSION: "3.22.1"
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -74,7 +75,7 @@ jobs:
           fi
           $SUDO apt-get update
           $SUDO apt-get install -y --no-install-recommends \
-            ca-certificates curl git unzip xz-utils zip
+            ca-certificates curl git unzip xz-utils zip ninja-build
 
       - name: Install or reuse JDK, Flutter and Android SDK
         shell: bash
@@ -124,8 +125,9 @@ jobs:
           export PATH="$JAVA_HOME/bin:$FLUTTER_HOME/bin:$ANDROID_HOME/cmdline-tools/latest/bin:$PATH"
           if [ -d "$ANDROID_HOME/platforms/android-${ANDROID_COMPILE_SDK}" ] && \
              [ -d "$ANDROID_HOME/platforms/android-${ANDROID_PLUGIN_SDK}" ] && \
-             [ -d "$ANDROID_HOME/build-tools/${ANDROID_BUILD_TOOLS}" ]; then
-            echo "toolchain: reuse Android platform/build-tools"
+             [ -d "$ANDROID_HOME/build-tools/${ANDROID_BUILD_TOOLS}" ] && \
+             [ -d "$ANDROID_HOME/cmake/${ANDROID_CMAKE_VERSION}" ]; then
+            echo "toolchain: reuse Android platform/build-tools/cmake"
           else
             echo "toolchain: install Android SDK packages"
             yes | sdkmanager --sdk_root="$ANDROID_HOME" --licenses >/dev/null 2>&1 || true
@@ -133,7 +135,8 @@ jobs:
               "platform-tools" \
               "platforms;android-${ANDROID_COMPILE_SDK}" \
               "platforms;android-${ANDROID_PLUGIN_SDK}" \
-              "build-tools;${ANDROID_BUILD_TOOLS}"
+              "build-tools;${ANDROID_BUILD_TOOLS}" \
+              "cmake;${ANDROID_CMAKE_VERSION}"
           fi
 
           cat > "$ROOT/env.sh" <<'EOF'
