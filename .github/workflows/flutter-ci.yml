@@ -41,14 +41,14 @@ jobs:
       ANDROID_CMAKE_VERSION: "3.22.1"
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Prepare cache directories
         shell: bash
         run: mkdir -p .ci-toolchain/toolchain .ci-toolchain/deps
 
       - name: Restore toolchain cache
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: .ci-toolchain/toolchain
           key: ci-toolchain-${{ runner.os }}-flutter-${{ inputs.flutter-version }}-jdk-${{ inputs.java-version }}-android-${{ inputs.android-compile-sdk }}-plugin-${{ inputs.android-plugin-sdk }}-${{ inputs.android-build-tools }}
@@ -56,7 +56,7 @@ jobs:
             ci-toolchain-${{ runner.os }}-flutter-${{ inputs.flutter-version }}-
 
       - name: Restore dependency cache
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: .ci-toolchain/deps
           key: ci-deps-${{ runner.os }}-${{ hashFiles('app/pubspec.lock', 'app/android/gradle/wrapper/gradle-wrapper.properties') }}
@@ -205,7 +205,7 @@ jobs:
           "$build_tools/apksigner" verify --print-certs "$apk"
 
       - name: Upload release APK
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: one-page-politics-release-apk
           path: app/build/app/outputs/flutter-apk/app-release.apk
