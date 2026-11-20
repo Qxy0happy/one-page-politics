@@ -15,6 +15,10 @@ on:
         description: Android compileSdk / platform version
         required: true
         type: string
+      android-plugin-sdk:
+        description: Android platform required by plugins (jni_flutter)
+        required: true
+        type: string
       android-build-tools:
         description: Android build-tools version
         required: true
@@ -32,6 +36,7 @@ jobs:
       FLUTTER_VERSION: ${{ inputs.flutter-version }}
       JAVA_VERSION: ${{ inputs.java-version }}
       ANDROID_COMPILE_SDK: ${{ inputs.android-compile-sdk }}
+      ANDROID_PLUGIN_SDK: ${{ inputs.android-plugin-sdk }}
       ANDROID_BUILD_TOOLS: ${{ inputs.android-build-tools }}
     steps:
       - name: Checkout
@@ -45,7 +50,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: .ci-toolchain/toolchain
-          key: ci-toolchain-${{ runner.os }}-flutter-${{ inputs.flutter-version }}-jdk-${{ inputs.java-version }}-android-${{ inputs.android-compile-sdk }}-${{ inputs.android-build-tools }}
+          key: ci-toolchain-${{ runner.os }}-flutter-${{ inputs.flutter-version }}-jdk-${{ inputs.java-version }}-android-${{ inputs.android-compile-sdk }}-plugin-${{ inputs.android-plugin-sdk }}-${{ inputs.android-build-tools }}
           restore-keys: |
             ci-toolchain-${{ runner.os }}-flutter-${{ inputs.flutter-version }}-
 
@@ -118,6 +123,7 @@ jobs:
 
           export PATH="$JAVA_HOME/bin:$FLUTTER_HOME/bin:$ANDROID_HOME/cmdline-tools/latest/bin:$PATH"
           if [ -d "$ANDROID_HOME/platforms/android-${ANDROID_COMPILE_SDK}" ] && \
+             [ -d "$ANDROID_HOME/platforms/android-${ANDROID_PLUGIN_SDK}" ] && \
              [ -d "$ANDROID_HOME/build-tools/${ANDROID_BUILD_TOOLS}" ]; then
             echo "toolchain: reuse Android platform/build-tools"
           else
@@ -126,6 +132,7 @@ jobs:
             sdkmanager --sdk_root="$ANDROID_HOME" \
               "platform-tools" \
               "platforms;android-${ANDROID_COMPILE_SDK}" \
+              "platforms;android-${ANDROID_PLUGIN_SDK}" \
               "build-tools;${ANDROID_BUILD_TOOLS}"
           fi
 

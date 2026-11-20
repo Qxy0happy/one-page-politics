@@ -23,4 +23,5 @@ jobs:
       flutter-version: "3.50.0"
       java-version: "25"
       android-compile-sdk: "36"
+      android-plugin-sdk: "35"
       android-build-tools: "36.0.0"
