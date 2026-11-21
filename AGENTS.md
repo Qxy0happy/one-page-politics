@@ -19,3 +19,19 @@ Single-context: root `GLOSSARY.md` plus `docs/adr/`. See `docs/agents/domain.md`
 - 构建工具若仍尝试自动安装，立即停止，并在报告中列出安装了哪些组件；不得把自动安装当作没有发生。
 - 不得擅自修改全局工具链配置（`flutter config`、`~/.gradle/gradle.properties`、`JAVA_HOME` 等）；需要修改时先说明并征得同意。
 - 删除或降级工具链同样需要确认。
+
+## 校验
+
+`tools/check.sh` 是唯一校验入口：格式、分析、测试、release 构建与 APK 断言；`.github/workflows` 调用同一脚本。提交前运行；只查代码时设 `SKIP_BUILD=1`（约 10 秒）。
+
+`flutter` 与 `adb` 在 PATH；`JAVA_HOME` 需指向带 `jlink` 的 JDK——GraalVM 的 `jlink` 会在 `JdkImageTransform` 失败。
+
+## 版本控制
+
+jj colocated 仓库：改动完成后依次 `jj describe`、`jj bookmark set main -r @`、`jj git push --bookmark main`。`origin` 是公开仓库。
+
+## 发布范围
+
+公开仓库只放代码与门禁：`app/`、`.github/`、`tools/`、`README.md`、`AGENTS.md`、`GLOSSARY.md`、`docs/`。
+
+课程转写 `srt/`、内部工单与规格 `.scratch/`、语料 `澄潇宇一页纸/`、教学笔记 `learning-records/`、`lessons/`、`reference/` 只保留在本地：`.gitignore` 忽略它们，`tools/check.sh` 校验它们未被跟踪。

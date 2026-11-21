@@ -165,49 +165,11 @@ jobs:
           cd app
           flutter pub get
 
-      - name: Analyze
+      - name: Analyze, test, build and verify
         shell: bash
         run: |
           source "$GITHUB_WORKSPACE/.ci-toolchain/env.sh"
-          cd app
-          flutter analyze
-
-      - name: Test
-        shell: bash
-        run: |
-          source "$GITHUB_WORKSPACE/.ci-toolchain/env.sh"
-          cd app
-          flutter test --reporter expanded
-
-      - name: Build release APK
-        shell: bash
-        run: |
-          source "$GITHUB_WORKSPACE/.ci-toolchain/env.sh"
-          cd app
-          flutter build apk --release
-
-      - name: Verify release APK
-        shell: bash
-        run: |
-          set -euo pipefail
-          source "$GITHUB_WORKSPACE/.ci-toolchain/env.sh"
-          apk=app/build/app/outputs/flutter-apk/app-release.apk
-          test -f "$apk"
-          sha256sum "$apk" | tee /tmp/apk.sha256
-          build_tools="$ANDROID_HOME/build-tools/${ANDROID_BUILD_TOOLS}"
-          "$build_tools/aapt2" dump permissions "$apk" | tee /tmp/permissions.txt
-          # INTERNET is required by the optional DeepSeek backend; storage permissions remain forbidden.
-          if ! grep -q 'android.permission.INTERNET' /tmp/permissions.txt; then
-            echo "::error::release APK must declare INTERNET for optional DeepSeek TTS"
-            exit 1
-          fi
-          if grep -Eq 'android.permission.(READ|WRITE)_EXTERNAL_STORAGE|android.permission.MANAGE_EXTERNAL_STORAGE|android.permission.READ_MEDIA_' /tmp/permissions.txt; then
-            echo "::error::release APK declares an unexpected storage permission"
-            exit 1
-          fi
-          "$build_tools/aapt2" dump xmltree --file AndroidManifest.xml "$apk" | tee /tmp/manifest.xml
-          grep -q 'TTS_SERVICE' /tmp/manifest.xml
-          "$build_tools/apksigner" verify --print-certs "$apk"
+          ./tools/check.sh
 
       - name: Upload release APK
         uses: actions/upload-artifact@v7

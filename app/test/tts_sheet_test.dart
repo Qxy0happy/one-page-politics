@@ -64,7 +64,9 @@ void main() {
             items: [makeItem('题干')],
             serviceFactory: (settings) {
               final service = TtsService(
-                engine: WidgetTtsEngine(supportsRate: settings.backend == TtsBackend.system),
+                engine: WidgetTtsEngine(
+                  supportsRate: settings.backend == TtsBackend.system,
+                ),
               );
               created.add(service);
               return service;
