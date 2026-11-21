@@ -1,0 +1,13 @@
+# git hook 配置：只覆盖 git CLI 路径（git commit / git push）。
+# 本仓库用 jj 推送，`jj git push` 不执行 git hooks；推前仍需手动运行 tools/check.sh。
+
+pre-commit:
+  commands:
+    check-code:
+      glob: "app/**/*.dart"
+      run: SKIP_BUILD=1 tools/check.sh
+
+pre-push:
+  commands:
+    check-all:
+      run: tools/check.sh

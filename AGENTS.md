@@ -24,6 +24,8 @@ Single-context: root `GLOSSARY.md` plus `docs/adr/`. See `docs/agents/domain.md`
 
 `tools/check.sh` 是唯一校验入口：格式、分析、测试、release 构建与 APK 断言；`.github/workflows` 调用同一脚本。提交前运行；只查代码时设 `SKIP_BUILD=1`（约 10 秒）。
 
+`lefthook.yml` 为 git CLI 提供 pre-commit（只查代码）与 pre-push（完整）两个钩子。`jj git push` 不执行 git hooks，推送前仍需运行 `tools/check.sh`。
+
 `flutter` 与 `adb` 在 PATH；`JAVA_HOME` 需指向带 `jlink` 的 JDK——GraalVM 的 `jlink` 会在 `JdkImageTransform` 失败。
 
 ## 版本控制
