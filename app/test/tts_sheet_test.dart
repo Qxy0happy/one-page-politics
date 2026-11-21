@@ -108,4 +108,37 @@ void main() {
     await tester.pump(const Duration(seconds: 5));
     await tester.pumpAndSettle();
   });
+
+  testWidgets('API Key 字段明文显示并使用普通文本键盘', (tester) async {
+    SharedPreferences.setMockInitialValues({});
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: TtsSheet(
+            items: [makeItem('题干')],
+            serviceFactory: (settings) => TtsService(
+              engine: WidgetTtsEngine(
+                supportsRate: settings.backend == TtsBackend.system,
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.text('朗读设置'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('DeepSeek'));
+    await tester.pumpAndSettle();
+
+    final field = tester.widget<TextField>(find.byType(TextField));
+    expect(field.obscureText, isFalse);
+    expect(field.keyboardType, TextInputType.text);
+    expect(field.enableSuggestions, isTrue);
+    expect(field.autocorrect, isFalse);
+    expect(field.enableIMEPersonalizedLearning, isFalse);
+    expect(find.byTooltip('显示密钥'), findsNothing);
+    expect(find.byTooltip('隐藏密钥'), findsNothing);
+  });
 }

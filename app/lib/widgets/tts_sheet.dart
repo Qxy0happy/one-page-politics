@@ -31,7 +31,6 @@ class _TtsSheetState extends State<TtsSheet> {
   var _failed = false;
   var _previewing = false;
   var _settingsOpen = false;
-  var _showApiKey = false;
   var _applying = false;
 
   @override
@@ -381,20 +380,16 @@ class _TtsSheetState extends State<TtsSheet> {
         const SizedBox(height: 6),
         TextField(
           controller: _apiKeyController,
-          obscureText: !_showApiKey,
+          obscureText: false,
+          keyboardType: TextInputType.text,
+          enableSuggestions: true,
           autocorrect: false,
-          enableSuggestions: false,
-          keyboardType: TextInputType.visiblePassword,
+          enableIMEPersonalizedLearning: false,
           onSubmitted: (_) => _saveApiKey(),
-          decoration: InputDecoration(
+          decoration: const InputDecoration(
             hintText: 'sk-...',
             isDense: true,
-            border: const OutlineInputBorder(),
-            suffixIcon: IconButton(
-              tooltip: _showApiKey ? '隐藏密钥' : '显示密钥',
-              onPressed: () => setState(() => _showApiKey = !_showApiKey),
-              icon: Icon(_showApiKey ? Icons.visibility_off : Icons.visibility),
-            ),
+            border: OutlineInputBorder(),
           ),
         ),
         const SizedBox(height: 6),
