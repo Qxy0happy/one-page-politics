@@ -2,9 +2,7 @@
 
 服务至 2026-12-19 的个人 Android 背诵工具。学习数据保存在本机；默认使用系统离线语音。可选的 DeepSeek 云语音需要网络与 API Key，release 因此声明 `INTERNET` 权限。
 
-- 功能与验收规格：[.scratch/one-page-politics-device/spec.md](../.scratch/one-page-politics-device/spec.md)
-- 冻结实施基线：[.scratch/one-page-politics/spec.md](../.scratch/one-page-politics/spec.md)
-- DeepSeek 云语音与可调停顿：[.scratch/deepseek-tts/spec.md](../.scratch/deepseek-tts/spec.md)
+功能规格、验收记录与工单保存在本地 `.scratch/` 与 `app/docs/`，不随仓库发布。
 
 ## 四个 Tab
 
