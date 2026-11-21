@@ -36,6 +36,6 @@ jj colocated 仓库：改动完成后依次 `jj describe`、`jj bookmark set mai
 
 ## 发布范围
 
-公开仓库只放代码与门禁：`app/`、`.github/`、`tools/`、`README.md`、`AGENTS.md`、`GLOSSARY.md`、`docs/`。
+公开仓库只放代码与门禁：`app/`、`.github/`、`tools/`、`assets/`、`docs/`、`README.md`、`AGENTS.md`、`GLOSSARY.md`、`lefthook.yml`、`skills-lock.json`、`.gitignore`。
 
 课程转写 `srt/`、内部工单与规格 `.scratch/`、语料 `澄潇宇一页纸/`、教学笔记 `learning-records/`、`lessons/`、`reference/` 只保留在本地：`.gitignore` 忽略它们，`tools/check.sh` 校验它们未被跟踪。
