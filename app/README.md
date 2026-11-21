@@ -4,7 +4,7 @@
 
 功能规格与工单保存在本地 `.scratch/`，不随仓库发布；验收记录见 `app/docs/device-acceptance.md`。
 
-当前版本：`1.2.1+4`（release `v1.2.1`），仅 arm64-v8a。
+当前版本：`1.2.2+5`（release `v1.2.2`），仅 arm64-v8a。
 
 ## 四个 Tab
 
@@ -80,7 +80,7 @@ TARGET_PLATFORM=android-arm64 RELEASE_CERT_SHA256=<证书 SHA-256> tools/check.s
   脚本在 `~/.config/one-page-politics/` 生成 PKCS12 keystore 与密码文件，并写入 GitHub Actions secrets；keystore 与密码必须离线备份。
 - 本地没有 `app/android/key.properties` 时，Gradle 退回 debug 签名，便于开发；正式发布必须由 Release 工作流注入专用 keystore。
 - `app/android/key.properties` 与 `*.keystore` 已被 `.gitignore` 忽略，不得提交。
-- 包名固定为 `com.qxyhappy.one_page_politics`；版本号取自 `pubspec.yaml`（当前 `1.2.1+4`）。
+- 包名固定为 `com.qxyhappy.one_page_politics`；版本号取自 `pubspec.yaml`（当前 `1.2.2+5`）。
 - 覆盖安装要求签名一致。v1.1.0 及更早版本使用本机 debug 签名，无法覆盖升级到专用签名版本；首次安装专用签名版本（v1.2.0 或更高）前必须卸载旧版，学习进度、真题记录与音频缓存会丢失。v1.2.0 及之后的专用签名版本可互相覆盖。
 - 后续更新递增 build number，不更换签名。`tools/check.sh` 的 `RELEASE_CERT_SHA256` 断言与 Release 工作流会阻止错误签名的发布。
 
