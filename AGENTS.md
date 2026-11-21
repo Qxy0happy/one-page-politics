@@ -30,6 +30,8 @@ Single-context: root `GLOSSARY.md` plus `docs/adr/`. See `docs/agents/domain.md`
 
 jj colocated 仓库：改动完成后依次 `jj describe`、`jj bookmark set main -r @`、`jj git push --bookmark main`。`origin` 是公开仓库。
 
+子代理开工前先 `jj new`：`jj describe` 只改当前提交的描述，直接在同一提交上编辑会改写共享基线。
+
 ## 发布范围
 
 公开仓库只放代码与门禁：`app/`、`.github/`、`tools/`、`README.md`、`AGENTS.md`、`GLOSSARY.md`、`docs/`。

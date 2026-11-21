@@ -10,6 +10,10 @@ Issues and specs for this repo live as markdown files in `.scratch/`.
 - Triage state is recorded as a `Status:` line near the top of each issue file (see `triage-labels.md` for the role strings)
 - Comments and conversation history append to the bottom of the file under a `## Comments` heading
 
+## Which spec is active
+
+When the user names a spec, that one is active. When they don't and `.scratch/` holds several `spec.md` files, take the most recently modified one and confirm it in one sentence before starting work; never audit the whole implementation against a stale spec.
+
 ## When a skill says "publish to the issue tracker"
 
 Create a new file under `.scratch/<feature-slug>/` (creating the directory if needed).

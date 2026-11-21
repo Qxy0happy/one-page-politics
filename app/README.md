@@ -15,20 +15,11 @@
 
 ## 构建
 
-环境：Flutter 3.50 / Dart 3.14（`sdk: ^3.14.0`），使用现有 Android SDK 与 JDK；项目不使用代码生成。JDK 建议使用 Temurin 或 OpenJDK。若 `flutter config` 指向 GraalVM，`flutter build apk` 会因 `jlink` 与 `jni` 插件的 `JdkImageTransform` 冲突停在 `:jni:compileReleaseJavaWithJavac`；可改用 OpenJDK 直接运行 Gradle（在 `app/android` 下）：
+环境：Flutter 3.50 / Dart 3.14（`sdk: ^3.14.0`），使用现有 Android SDK 与带 `jlink` 的 JDK；项目不使用代码生成。
 
 ```bash
-JAVA_HOME=/usr/lib/jvm/java-27-openjdk ./gradlew assembleRelease
-```
-
-或把 `flutter config --jdk-dir` 指向 OpenJDK。CI 使用 Temurin。
-
-```bash
-cd app
-flutter pub get
-flutter analyze
-flutter test
-flutter build apk --release
+tools/check.sh            # 格式、分析、测试、release 构建与 APK 断言
+SKIP_BUILD=1 tools/check.sh  # 只查代码
 ```
 
 产物为 universal release APK：
@@ -36,6 +27,8 @@ flutter build apk --release
 ```
 app/build/app/outputs/flutter-apk/app-release.apk
 ```
+
+脚本使用 `JAVA_HOME` 指向的 JDK。GraalVM 的 `jlink` 会在 `JdkImageTransform` 失败；此时把 `JAVA_HOME` 指向 Temurin/OpenJDK。CI 使用 Temurin。
 
 构建、权限、签名与版本的核对命令见 [docs/device-acceptance.md](docs/device-acceptance.md) 的“构建与静态检查”。
 
