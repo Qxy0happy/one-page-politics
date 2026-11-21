@@ -172,3 +172,65 @@ adb logcat -d | grep -iE "tts|texttospeech|speech" > tts-logcat.txt
 - [ ] 音质主观评价（可选）：如需量化断句、语速舒适度，建议由用户按日常听力习惯再听一轮。
 
 结论：真机验收通过（1–3、5–7 通过；第 4 项的无中文降级路径因设备上没有现成无中文引擎而未复现，已由单元测试覆盖）。最终 APK 为 `4b13a8…`，应用在验收后已清空测试数据并恢复到 `549` 条、0 进度；媒体音量、常亮、飞行模式与 TTS 引擎均已恢复。
+
+## 应用内更新验收（2026-11-21，模拟器）
+
+应用内更新需要两个同签名、versionCode 递增的构建，以及一个可被设备访问的更新源。正式发布包为 arm64-v8a；下面的模拟器流程用 x86_64 构建验证清单获取、下载、校验、权限提示与系统安装器链路，不替代真机的最终安装确认。
+
+本次实测环境：`sdk_gphone64_x86_64`，Android 16（SDK 36）；首包 `1.2.0（3）`，次包 `1.2.1（4）`，均为 x86_64、本机 debug 签名，更新源为宿主机 `http://10.0.2.2:8000`。正式包为 arm64-v8a 与专用签名。
+
+### 构建
+
+首包（v1.2.0，versionCode 3）：
+
+```bash
+cd app
+flutter build apk --release --target-platform android-x64 \
+  --build-name=1.2.0 --build-number=3 \
+  --dart-define=UPDATE_MANIFEST_URL=http://10.0.2.2:8000/update.json \
+  --dart-define=ALLOW_INSECURE_UPDATE=true
+cp build/app/outputs/flutter-apk/app-release.apk /tmp/update-acceptance/first.apk
+```
+
+次包（v1.2.1，versionCode 4）：同样的命令，改 `--build-name=1.2.1 --build-number=4`，输出为 `second.apk`。两次必须使用同一签名（本地默认为 `~/.android/debug.keystore`）。
+
+### 本地更新源
+
+```bash
+mkdir -p /tmp/update-acceptance
+cd /tmp/update-acceptance
+cp /path/to/second.apk one-page-politics-1.2.1.apk
+SHA="$(sha256sum one-page-politics-1.2.1.apk | awk '{print $1}')"
+SIZE="$(stat -c %s one-page-politics-1.2.1.apk)"
+jq -n --arg sha "$SHA" --argjson size "$SIZE" '{
+  schemaVersion: 1,
+  versionCode: 4,
+  versionName: "1.2.1",
+  minSdk: 24,
+  publishedAt: "2026-11-21T12:00:00Z",
+  notes: "验收用更新",
+  apk: {url: "http://10.0.2.2:8000/one-page-politics-1.2.1.apk", size: $size, sha256: $sha}
+}' > update.json
+python3 -m http.server 8000 --bind 0.0.0.0
+```
+
+模拟器通过 `10.0.2.2` 访问宿主机；`ALLOW_INSECURE_UPDATE=true` 只用于本地联调，正式构建不设置。
+
+### 步骤与结果
+
+| # | 检查项 | 操作要点 | 结果 | 证据 |
+|---|---|---|---|---|
+| 1 | 首包安装与启动 | `adb install -r first.apk`，冷启动，确认版本卡显示 `1.2.0（3）` | 通过：安装成功；版本卡显示 `当前 1.2.0（3）` | 模拟器截图 |
+| 2 | 静默检查 | 启动后等待 SnackBar“发现新版本 v1.2.1”；点“查看”进入作战室 | 通过：启动后出现 SnackBar `发现新版本 v1.2.1`；本地 HTTP 日志 `GET /update.json 200` | 服务日志、截图 |
+| 3 | 更新对话框 | 版本卡点“查看”，确认版本、大小、日期与说明；点“稍后”后保留“新版本”入口 | 通过：显示 `发现新版本 v1.2.1`、`当前版本 1.2.0（3）`、`19.4 MB · 2026-11-21` 与说明；`稍后` 后版本卡保留 `新版本 v1.2.1 / 查看` | 截图 |
+| 4 | 下载与续传 | 点“下载并安装”，观察进度；中途取消，再次下载应从 `.part` 续传 | 部分通过：点击后日志出现 `GET /one-page-politics-1.2.1.apk 200`，下载与校验完成；取消/续传未在模拟器重复，由 `update_service_test.dart` 的 Range、取消与 416 用例覆盖 | 服务日志、测试输出 |
+| 5 | 校验与安装 | 下载完成后显示校验，再调起系统安装器；允许“安装未知应用”并确认安装 | 通过：未授权时打开系统“安装未知应用”页；授权后点“下载并安装”调起 `PackageInstallerActivity`，确认后安装成功 | 截图、`dumpsys window` |
+| 6 | 升级结果 | 返回应用后版本卡显示 `1.2.1（4）`；再次检查显示已是最新 | 通过：`dumpsys package` 显示 `versionCode=4`、`versionName=1.2.1`；版本卡 `当前 1.2.1（4）`，无更新提示 | 命令输出、截图 |
+| 7 | 校验失败 | 把 `update.json` 的 `sha256` 改错，手动检查应显示 SHA-256 不一致且不调起安装器 | 未执行：Dart 层“校验失败不调起安装器”由 `update_provider_test.dart` 覆盖；原生 SHA-256 计算未在模拟器构造错包 | 测试输出、代码审查 |
+| 8 | 签名不一致 | 用另一把 keystore 签次包，校验应显示签名不一致且不调起安装器 | 未执行：同一单元测试覆盖 `VerifyResult` 失败路径；原生签名比对未在模拟器构造异签名包 | 测试输出、代码审查 |
+
+补充观察：首包发现 `1.2.1` 后强制停止并重开，24 小时缓存内未重复请求 `update.json`，版本卡与 SnackBar 仍从本地保存的清单恢复；升级到 `1.2.1（4）` 后更新提示清除。
+
+失败时记录 `adb logcat -d | grep -iE "update|packageinstaller|PackageInstaller"` 的相关片段，并附截图。
+
+结论：应用内更新主链路在模拟器上通过（清单获取、对话框、下载、权限、系统安装器、升级到 `1.2.1/4`）。负向的 SHA-256/签名不一致路径未在模拟器构造，分别由单元测试与代码审查覆盖；真机 OEM 安装器、正式 arm64 包与专用签名包仍需在发布前人工确认。

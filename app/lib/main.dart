@@ -5,9 +5,12 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'pages/home_shell.dart';
 import 'providers/study_provider.dart';
 import 'providers/theme_controller.dart';
+import 'providers/update_provider.dart';
 import 'providers/war_room_provider.dart';
 import 'services/md_parser_service.dart';
 import 'services/storage_service.dart';
+import 'services/update_gateway.dart';
+import 'services/update_service.dart';
 import 'theme/app_theme.dart';
 
 Future<void> main() async {
@@ -18,9 +21,19 @@ Future<void> main() async {
   await study.load();
   final warRoom = WarRoomProvider(storage: storage, prefs: prefs, study: study);
   await warRoom.load();
+  final update = UpdateProvider(
+    service: UpdateService(
+      gateway: const AndroidUpdateGateway(),
+      allowInsecure: kAllowInsecureUpdate,
+    ),
+    prefs: prefs,
+  );
+  await update.load();
   final theme = ThemeController(prefs);
 
-  runApp(OnePageApp(study: study, theme: theme, warRoom: warRoom));
+  runApp(
+    OnePageApp(study: study, theme: theme, warRoom: warRoom, update: update),
+  );
 }
 
 class OnePageApp extends StatelessWidget {
@@ -29,11 +42,13 @@ class OnePageApp extends StatelessWidget {
     required this.study,
     required this.theme,
     required this.warRoom,
+    required this.update,
   });
 
   final StudyProvider study;
   final ThemeController theme;
   final WarRoomProvider warRoom;
+  final UpdateProvider update;
 
   @override
   Widget build(BuildContext context) {
@@ -42,6 +57,7 @@ class OnePageApp extends StatelessWidget {
         ChangeNotifierProvider.value(value: study),
         ChangeNotifierProvider.value(value: theme),
         ChangeNotifierProvider.value(value: warRoom),
+        ChangeNotifierProvider.value(value: update),
       ],
       child: Consumer<ThemeController>(
         builder: (context, themeController, _) {

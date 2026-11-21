@@ -7,6 +7,7 @@ import 'package:provider/provider.dart';
 
 import '../models/exam_record.dart';
 import '../providers/study_provider.dart';
+import '../providers/update_provider.dart';
 import '../providers/war_room_provider.dart';
 import '../services/md_exporter.dart';
 import '../services/md_parser_service.dart';
@@ -15,6 +16,7 @@ import '../services/study_timer.dart';
 import '../theme/app_theme.dart';
 import '../widgets/exam_record_dialog.dart';
 import '../widgets/score_line_chart.dart';
+import '../widgets/update_dialog.dart';
 
 class Tab4WarRoomPage extends StatefulWidget {
   const Tab4WarRoomPage({super.key});
@@ -43,6 +45,7 @@ class _Tab4WarRoomPageState extends State<Tab4WarRoomPage> {
   Widget build(BuildContext context) {
     final war = context.watch<WarRoomProvider>();
     final study = context.watch<StudyProvider>();
+    final update = context.watch<UpdateProvider>();
     final theme = Theme.of(context);
 
     if (war.loading) {
@@ -96,6 +99,8 @@ class _Tab4WarRoomPageState extends State<Tab4WarRoomPage> {
             ],
             const SizedBox(height: 18),
             _dataSection(theme, study, war),
+            const SizedBox(height: 12),
+            _updateSection(theme, update),
           ],
         ),
       ),
@@ -326,6 +331,80 @@ class _Tab4WarRoomPageState extends State<Tab4WarRoomPage> {
         ],
       ),
     );
+  }
+
+  Widget _updateSection(ThemeData theme, UpdateProvider update) {
+    final available = update.available;
+    final checking = update.phase == UpdatePhase.checking;
+    return Card(
+      child: Column(
+        children: [
+          ListTile(
+            leading: const Icon(Icons.system_update_alt),
+            title: const Text('版本与更新'),
+            subtitle: Text('当前 ${update.currentVersionLabel}'),
+            trailing: checking
+                ? const SizedBox(
+                    width: 20,
+                    height: 20,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  )
+                : TextButton(
+                    onPressed: () => _checkUpdate(update),
+                    child: const Text('检查更新'),
+                  ),
+          ),
+          if (available != null) ...[
+            const Divider(height: 1),
+            ListTile(
+              leading: const Icon(Icons.new_releases_outlined),
+              title: Text('新版本 v${available.versionName}'),
+              subtitle: Text(
+                '${available.sizeLabel} · ${_updateDate(available.publishedAt)}',
+              ),
+              trailing: FilledButton(
+                onPressed: () => showUpdateDialog(context),
+                child: const Text('查看'),
+              ),
+            ),
+          ],
+          const Divider(height: 1),
+          SwitchListTile(
+            value: update.checkOnLaunch,
+            onChanged: update.setCheckOnLaunch,
+            title: const Text('启动时检查更新'),
+            subtitle: const Text('最多每 24 小时请求一次清单；失败不影响使用'),
+          ),
+          const Divider(height: 1),
+          ListTile(
+            leading: const Icon(Icons.open_in_new),
+            title: const Text('在浏览器中打开 Releases'),
+            onTap: update.openReleasesPage,
+          ),
+        ],
+      ),
+    );
+  }
+
+  String _updateDate(DateTime value) {
+    final local = value.toLocal();
+    final month = local.month.toString().padLeft(2, '0');
+    final day = local.day.toString().padLeft(2, '0');
+    return '${local.year}-$month-$day';
+  }
+
+  Future<void> _checkUpdate(UpdateProvider update) async {
+    await update.check();
+    if (!mounted) return;
+    if (update.available != null) {
+      await showUpdateDialog(context);
+      return;
+    }
+    if (update.phase == UpdatePhase.error) {
+      _snack(update.message ?? '检查更新失败');
+    } else {
+      _snack('已是最新版本');
+    }
   }
 
   Future<void> _addRecord(StudyProvider study, WarRoomProvider war) async {

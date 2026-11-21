@@ -23,9 +23,30 @@ on:
         description: Android build-tools version
         required: true
         type: string
+      release:
+        description: Build and publish a GitHub Release
+        required: false
+        type: boolean
+        default: false
+      target-platform:
+        description: Flutter target platform (e.g. android-arm64); empty builds all ABIs
+        required: false
+        type: string
+        default: ""
+    secrets:
+      KEYSTORE_BASE64:
+        required: false
+      KEYSTORE_PASSWORD:
+        required: false
+      KEY_ALIAS:
+        required: false
+      KEY_PASSWORD:
+        required: false
+      RELEASE_CERT_SHA256:
+        required: false
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   ci:
@@ -42,6 +63,31 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v7
+
+      - name: Restore release keystore
+        if: ${{ inputs.release }}
+        shell: bash
+        env:
+          KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
+          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+        run: |
+          set -euo pipefail
+          : "${KEYSTORE_BASE64:?缺少 KEYSTORE_BASE64}"
+          : "${KEYSTORE_PASSWORD:?缺少 KEYSTORE_PASSWORD}"
+          : "${KEY_ALIAS:?缺少 KEY_ALIAS}"
+          : "${KEY_PASSWORD:?缺少 KEY_PASSWORD}"
+          mkdir -p app/android/app
+          printf '%s' "$KEYSTORE_BASE64" | base64 -d > app/android/app/release.keystore
+          chmod 600 app/android/app/release.keystore
+          cat > app/android/key.properties <<EOF
+          storeFile=release.keystore
+          storePassword=$KEYSTORE_PASSWORD
+          keyAlias=$KEY_ALIAS
+          keyPassword=$KEY_PASSWORD
+          EOF
+          chmod 600 app/android/key.properties
 
       - name: Prepare cache directories
         shell: bash
@@ -165,11 +211,80 @@ jobs:
           cd app
           flutter pub get
 
-      - name: Analyze, test, build and verify
+      - name: Validate release tag
+        if: ${{ inputs.release }}
         shell: bash
         run: |
+          set -euo pipefail
+          VERSION_LINE="$(awk '/^version:/{print $2; exit}' app/pubspec.yaml)"
+          VERSION_NAME="${VERSION_LINE%%+*}"
+          TAG_VERSION="${GITHUB_REF_NAME#v}"
+          [ "$VERSION_NAME" = "$TAG_VERSION" ] || {
+            echo "tag $GITHUB_REF_NAME 与 app/pubspec.yaml 的 $VERSION_LINE 不一致" >&2
+            exit 1
+          }
+
+      - name: Analyze, test, build and verify
+        shell: bash
+        env:
+          TARGET_PLATFORM: ${{ inputs.target-platform }}
+          RELEASE_CERT_SHA256: ${{ secrets.RELEASE_CERT_SHA256 }}
+          RELEASE_BUILD: ${{ inputs.release }}
+        run: |
           source "$GITHUB_WORKSPACE/.ci-toolchain/env.sh"
+          if [ "${RELEASE_BUILD}" = "true" ]; then
+            : "${RELEASE_CERT_SHA256:?release 构建缺少 RELEASE_CERT_SHA256}"
+          fi
           ./tools/check.sh
+
+      - name: Publish GitHub release
+        if: ${{ inputs.release }}
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          source "$GITHUB_WORKSPACE/.ci-toolchain/env.sh"
+          VERSION_LINE="$(awk '/^version:/{print $2; exit}' app/pubspec.yaml)"
+          VERSION_NAME="${VERSION_LINE%%+*}"
+          VERSION_CODE="${VERSION_LINE##*+}"
+          APK="app/build/app/outputs/flutter-apk/app-release.apk"
+          [ -f "$APK" ] || { echo "缺少 $APK" >&2; exit 1; }
+          mkdir -p build/release
+          ASSET_NAME="one-page-politics-$VERSION_NAME.apk"
+          cp "$APK" "build/release/$ASSET_NAME"
+          (cd build/release && sha256sum "$ASSET_NAME" > "$ASSET_NAME.sha256")
+          DOWNLOAD_URL="https://github.com/${GITHUB_REPOSITORY}/releases/download/${GITHUB_REF_NAME}/${ASSET_NAME}"
+          BUILD_TOOLS="$(find "$ANDROID_HOME/build-tools" -mindepth 1 -maxdepth 1 -type d | sort -V | tail -1)"
+          MIN_SDK="$("$BUILD_TOOLS/aapt2" dump badging "$APK" | sed -n -e "s/^minSdkVersion:'\([0-9]*\)'.*/\1/p" -e "s/^sdkVersion:'\([0-9]*\)'.*/\1/p" | head -1)"
+          MIN_SDK="${MIN_SDK:-24}"
+          NOTES="$(git tag -l --format='%(contents)' "$GITHUB_REF_NAME" || true)"
+          [ -n "$NOTES" ] || NOTES="内容更新与稳定性改进"
+          APK="build/release/$ASSET_NAME" \
+          VERSION_NAME="$VERSION_NAME" \
+          VERSION_CODE="$VERSION_CODE" \
+          MIN_SDK="$MIN_SDK" \
+          ASSET_NAME="$ASSET_NAME" \
+          DOWNLOAD_URL="$DOWNLOAD_URL" \
+          NOTES="$NOTES" \
+          OUTPUT="build/release/update.json" \
+          ./tools/make_update_manifest.sh
+          if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
+            gh release upload "$GITHUB_REF_NAME" \
+              "build/release/$ASSET_NAME" \
+              "build/release/$ASSET_NAME.sha256" \
+              "build/release/update.json" \
+              --clobber
+          else
+            gh release create "$GITHUB_REF_NAME" \
+              "build/release/$ASSET_NAME" \
+              "build/release/$ASSET_NAME.sha256" \
+              "build/release/update.json" \
+              --title "一页纸 $VERSION_NAME" \
+              --notes "$NOTES" \
+              --verify-tag
+          fi
 
       - name: Upload release APK
         uses: actions/upload-artifact@v7
@@ -178,3 +293,8 @@ jobs:
           path: app/build/app/outputs/flutter-apk/app-release.apk
           if-no-files-found: error
           retention-days: 14
+
+      - name: Remove release keystore
+        if: ${{ always() }}
+        shell: bash
+        run: rm -f app/android/app/release.keystore app/android/key.properties

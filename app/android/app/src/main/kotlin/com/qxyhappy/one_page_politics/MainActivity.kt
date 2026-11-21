@@ -5,6 +5,7 @@ import io.flutter.embedding.engine.FlutterEngine
 
 class MainActivity : FlutterActivity() {
     private var ttsAudioStore: TtsAudioStore? = null
+    private var updateInstaller: UpdateInstaller? = null
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
@@ -12,9 +13,15 @@ class MainActivity : FlutterActivity() {
             applicationContext,
             flutterEngine.dartExecutor.binaryMessenger,
         )
+        updateInstaller = UpdateInstaller(
+            this,
+            flutterEngine.dartExecutor.binaryMessenger,
+        )
     }
 
     override fun onDestroy() {
+        updateInstaller?.dispose()
+        updateInstaller = null
         ttsAudioStore?.dispose()
         ttsAudioStore = null
         super.onDestroy()
