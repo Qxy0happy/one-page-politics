@@ -5,30 +5,22 @@
 #   tools/check.sh              # 格式、分析、测试、release 构建、APK 断言
 #   SKIP_BUILD=1 tools/check.sh # 跳过构建与 APK 断言（纯代码检查，约 10 秒）
 #
-# 依赖：flutter（PATH）、JAVA_HOME 指向带 jlink 的 JDK、ANDROID_HOME 指向 Android SDK。
+# 依赖：flutter（PATH）；构建阶段另需 JAVA_HOME（带 jlink 的 JDK）与 ANDROID_HOME。
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 APP="$ROOT/app"
 APK="$APP/build/app/outputs/flutter-apk/app-release.apk"
-
-: "${JAVA_HOME:?JAVA_HOME 未设置；需要带 jlink 的 JDK（GraalVM 的 jlink 会失败）}"
-: "${ANDROID_HOME:?ANDROID_HOME 未设置；需要 Android SDK}"
+FORBIDDEN='^(srt/|\.scratch/|澄潇宇一页纸/|learning-records/|lessons/|reference/)|^澄潇宇考研政治主张整理\.md$'
 
 fail() { printf 'check: %s\n' "$1" >&2; exit 1; }
 step() { printf '\n==> %s\n' "$1"; }
 
-build_tools() {
-  local dir
-  dir="$(find "$ANDROID_HOME/build-tools" -mindepth 1 -maxdepth 1 -type d | sort -V | tail -1)"
-  [ -n "$dir" ] || fail "未找到 build-tools"
-  printf '%s\n' "$dir"
-}
-
-step "追踪路径白名单：课程转写与内部文档不得进入版本控制"
-if (cd "$ROOT" && git ls-files) | grep -Eq '^(srt/|\.scratch/|澄潇宇一页纸/|learning-records/|lessons/|reference/)|^澄潇宇考研政治主张整理\.md$'; then
-  (cd "$ROOT" && git ls-files) | grep -E '^(srt/|\.scratch/|澄潇宇一页纸/|learning-records/|lessons/|reference/)|^澄潇宇考研政治主张整理\.md$' >&2
-  fail "上述路径被 git 跟踪；它们只应保留在本地（见 .gitignore）"
+step "追踪路径白名单：课程转写与内部文档不进版本控制"
+TRACKED="$(cd "$ROOT" && git ls-files)"
+if printf '%s\n' "$TRACKED" | grep -Eq "$FORBIDDEN"; then
+  printf '%s\n' "$TRACKED" | grep -E "$FORBIDDEN" >&2
+  fail "上述路径被 git 跟踪；它们只保留在本地（见 .gitignore）"
 fi
 
 cd "$APP"
@@ -47,28 +39,30 @@ if [ "${SKIP_BUILD:-0}" = "1" ]; then
   exit 0
 fi
 
+: "${JAVA_HOME:?JAVA_HOME 未设置；需要带 jlink 的 JDK（GraalVM 的 jlink 会失败）}"
+: "${ANDROID_HOME:?ANDROID_HOME 未设置；需要 Android SDK}"
+
 step "flutter build apk --release"
 flutter build apk --release
 [ -f "$APK" ] || fail "未生成 $APK"
 
-TOOLS="$(build_tools)"
+BUILD_TOOLS="$(find "$ANDROID_HOME/build-tools" -mindepth 1 -maxdepth 1 -type d | sort -V | tail -1)"
+[ -n "$BUILD_TOOLS" ] || fail "未找到 build-tools"
+
 step "APK 断言：权限、TTS 查询、签名"
 
-"$TOOLS/aapt2" dump permissions "$APK" > /tmp/check-permissions.txt
-if ! grep -q 'android.permission.INTERNET' /tmp/check-permissions.txt; then
-  fail "release APK 必须声明 INTERNET（可选 DeepSeek 云语音）"
-fi
+"$BUILD_TOOLS/aapt2" dump permissions "$APK" > /tmp/check-permissions.txt
+grep -q 'android.permission.INTERNET' /tmp/check-permissions.txt \
+  || fail "release APK 必须声明 INTERNET（可选 DeepSeek 云语音）"
 if grep -Eq 'android.permission.(READ|WRITE)_EXTERNAL_STORAGE|android.permission.MANAGE_EXTERNAL_STORAGE|android.permission.READ_MEDIA_' /tmp/check-permissions.txt; then
   cat /tmp/check-permissions.txt >&2
   fail "release APK 声明了多余的存储权限"
 fi
 
-"$TOOLS/aapt2" dump xmltree --file AndroidManifest.xml "$APK" > /tmp/check-manifest.xml
-if ! grep -q 'TTS_SERVICE' /tmp/check-manifest.xml; then
-  fail "AndroidManifest 缺少 TTS_SERVICE 查询声明"
-fi
+"$BUILD_TOOLS/aapt2" dump xmltree --file AndroidManifest.xml "$APK" > /tmp/check-manifest.xml
+grep -q 'TTS_SERVICE' /tmp/check-manifest.xml || fail "AndroidManifest 缺少 TTS_SERVICE 查询声明"
 
-"$TOOLS/apksigner" verify --print-certs "$APK" > /tmp/check-signer.txt || fail "APK 签名校验失败"
+"$BUILD_TOOLS/apksigner" verify --print-certs "$APK" > /tmp/check-signer.txt || fail "APK 签名校验失败"
 sha256sum "$APK" | tee /tmp/check-apk.sha256
 
 printf '\ncheck: 全部通过\n'
