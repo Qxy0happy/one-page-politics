@@ -234,3 +234,13 @@ python3 -m http.server 8000 --bind 0.0.0.0
 失败时记录 `adb logcat -d | grep -iE "update|packageinstaller|PackageInstaller"` 的相关片段，并附截图。
 
 结论：应用内更新主链路在模拟器上通过（清单获取、对话框、下载、权限、系统安装器、升级到 `1.2.1/4`）。负向的 SHA-256/签名不一致路径未在模拟器构造，分别由单元测试与代码审查覆盖；真机 OEM 安装器、正式 arm64 包与专用签名包仍需在发布前人工确认。
+
+## DeepSeek 真机回归（2026-11-21）
+
+设备：HONOR `AAK-AN00`，Android 16（SDK 36），应用 `1.2.2`（5），使用真机已保存的 DeepSeek API Key。
+
+- 现象：整队朗读时连续 6 条失败，横幅为「播报异常 · 已跳过 6 条 · 播放器错误（1/-2147483648）」；`logcat` 显示 `NuPlayerDriver: notifyPrepareCompleted -2147483648` 与 `MediaPlayerNative: error (1, -2147483648)`。
+- 取证：应用缓存 `files/tts_cache` 中只有 `.wav`、没有 `.m4a`；试听句对应的 `a5ecd6e27da7338d.wav` 头部为 `RIFF ff ff ff ff … data ff ff ff ff`，实际格式为 24 kHz / 16 位 / 单声道 PCM。取证期间临时安装同签名可调试包读取私有目录，随后恢复正式 release。
+- 根因：DeepSeek 边合成边返回，流式 WAV 的长度字段是占位值 `0xFFFFFFFF`；`WavPcmParser` 因声明长度超过文件而放弃解析，退回保存原始 WAV，`MediaPlayer` 无法准备播放。
+- 修复：解析 `data` 块时按实际剩余字节截断；回退 WAV 重写 RIFF 与 `data` 长度；缓存键前缀由 `v1` 升为 `v2`，避免复用旧文件。
+- 验证：修复后试听与整队朗读正常，日志使用 `c2.android.aac.decoder`（AAC/M4A 路径），无 `MediaPlayer` 错误，队列由 `1 / 549` 前进到 `2 / 549`；`tools/check.sh` 全量通过（125 个测试、release 构建与 APK 断言），549 条内容保留。

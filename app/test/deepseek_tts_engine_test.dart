@@ -131,7 +131,7 @@ DeepSeekTtsEngine buildEngine({
 void main() {
   group('缓存键', () {
     test('同一音色与文本得到稳定键', () {
-      expect(ttsCacheKey('stella', '文本'), 'ec15be728cd94d8a');
+      expect(ttsCacheKey('stella', '文本'), '40d1cfd32f923ccf');
       expect(ttsCacheKey('stella', '文本'), ttsCacheKey('stella', '文本'));
       expect(ttsCacheKey('stella', '文本'), matches(RegExp(r'^[0-9a-f]{16}$')));
     });
@@ -163,7 +163,7 @@ void main() {
       expect(body['filter_markdown'], isTrue);
 
       final key = ttsCacheKey('stella', '你好，世界');
-      expect(key, '10ec138c85344798');
+      expect(key, '49be95c5aa9cde23');
       expect(store.storedKeys, [key]);
       expect(store.stored[key], wavBytes());
       expect(store.played, isEmpty);

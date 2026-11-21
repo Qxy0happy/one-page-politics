@@ -39,8 +39,10 @@ class TtsAudioStore(
 
     private var player: MediaPlayer? = null
     private var token: String? = null
+
     @Volatile
     private var disposed = false
+
     @Volatile
     private var playbackGeneration = 0L
 
@@ -149,7 +151,12 @@ class TtsAudioStore(
         val temp = File(cacheDir, "$key.wav.tmp")
         temp.delete()
         return try {
-            temp.writeBytes(wavBytes)
+            // 编码失败时退回 WAV；改写流式占位长度（RIFF/data =
+            // 0xFFFFFFFF），否则 MediaPlayer 无法准备播放。
+            temp.writeBytes(
+                if (wav != null) WavPcmParser.canonicalWav(wav)
+                else WavPcmParser.patchedWavSizes(wavBytes),
+            )
             if (target.exists()) target.delete()
             if (temp.renameTo(target)) target else null
         } catch (_: Exception) {
@@ -400,10 +407,19 @@ class TtsAudioStore(
 
             while (offset + 8 <= bytes.size) {
                 val id = ascii(bytes, offset, 4)
-                val size = readUInt32(bytes, offset + 4)
+                val declared = readUInt32(bytes, offset + 4)
                 val payload = offset + 8
-                if (payload.toLong() + size > bytes.size.toLong()) break
-                val chunkSize = size.toInt()
+                val available = (bytes.size - payload).toLong()
+                // DeepSeek 边合成边返回，流式 WAV 的 data 块长度是 0xFFFFFFFF
+                // （未知）。按实际剩余字节截断；否则整段解析失败，退回保存
+                // 头部非法的 WAV，系统 MediaPlayer 无法准备播放。
+                val chunkSize = when {
+                    id == "data" && (declared == 0L || declared > available) ->
+                        available.toInt()
+
+                    declared > available -> break
+                    else -> declared.toInt()
+                }
                 when (id) {
                     "fmt " -> {
                         if (chunkSize < 16) return null
@@ -419,7 +435,7 @@ class TtsAudioStore(
 
                     "data" -> {
                         dataOffset = payload
-                        dataSize = size
+                        dataSize = chunkSize.toLong()
                     }
                 }
                 offset = payload + chunkSize + (chunkSize and 1)
@@ -434,6 +450,65 @@ class TtsAudioStore(
             val length = minOf(dataSize, available.toLong()).toInt()
             if (length <= 0) return null
             return WavPcm(sampleRate, channels, bytes.copyOfRange(dataOffset, dataOffset + length))
+        }
+
+        /** 用解析出的 PCM 重建 44 字节标准头，长度字段与实际数据一致。 */
+        fun canonicalWav(wav: WavPcm): ByteArray {
+            val blockAlign = wav.channels * 2
+            val header = ByteArray(44)
+            "RIFF".toByteArray(Charsets.US_ASCII).copyInto(header, 0)
+            writeUInt32(header, 4, (wav.pcm.size + 36).toLong())
+            "WAVE".toByteArray(Charsets.US_ASCII).copyInto(header, 8)
+            "fmt ".toByteArray(Charsets.US_ASCII).copyInto(header, 12)
+            writeUInt32(header, 16, 16)
+            writeUInt16(header, 20, 1)
+            writeUInt16(header, 22, wav.channels)
+            writeUInt32(header, 24, wav.sampleRate.toLong())
+            writeUInt32(header, 28, wav.sampleRate.toLong() * blockAlign)
+            writeUInt16(header, 32, blockAlign)
+            writeUInt16(header, 34, 16)
+            "data".toByteArray(Charsets.US_ASCII).copyInto(header, 36)
+            writeUInt32(header, 40, wav.pcm.size.toLong())
+            return header + wav.pcm
+        }
+
+        /** 无法解析 PCM 时仅修补流式占位长度；格式仍不支持时原样返回。 */
+        fun patchedWavSizes(bytes: ByteArray): ByteArray {
+            if (bytes.size < 12) return bytes
+            if (ascii(bytes, 0, 4) != "RIFF" || ascii(bytes, 8, 4) != "WAVE") {
+                return bytes
+            }
+            var offset = 12
+            while (offset + 8 <= bytes.size) {
+                val id = ascii(bytes, offset, 4)
+                val declared = readUInt32(bytes, offset + 4)
+                val payload = offset + 8
+                if (id == "data") {
+                    val actual = (bytes.size - payload).toLong()
+                    if (declared == actual && readUInt32(bytes, 4) == actual + 8) {
+                        return bytes
+                    }
+                    val copy = bytes.copyOf()
+                    writeUInt32(copy, 4, actual + 8)
+                    writeUInt32(copy, payload - 4, actual)
+                    return copy
+                }
+                if (declared > (bytes.size - payload).toLong()) return bytes
+                offset = payload + declared.toInt() + (declared.toInt() and 1)
+            }
+            return bytes
+        }
+
+        private fun writeUInt16(bytes: ByteArray, offset: Int, value: Int) {
+            bytes[offset] = (value and 0xFF).toByte()
+            bytes[offset + 1] = ((value ushr 8) and 0xFF).toByte()
+        }
+
+        private fun writeUInt32(bytes: ByteArray, offset: Int, value: Long) {
+            bytes[offset] = (value and 0xFF).toByte()
+            bytes[offset + 1] = ((value ushr 8) and 0xFF).toByte()
+            bytes[offset + 2] = ((value ushr 16) and 0xFF).toByte()
+            bytes[offset + 3] = ((value ushr 24) and 0xFF).toByte()
         }
 
         private fun ascii(bytes: ByteArray, offset: Int, length: Int): String =
