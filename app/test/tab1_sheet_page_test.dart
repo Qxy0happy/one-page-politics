@@ -6,6 +6,7 @@ import 'package:one_page_politics/pages/tab1_sheet_page.dart';
 import 'package:one_page_politics/providers/study_provider.dart';
 import 'package:one_page_politics/providers/theme_controller.dart';
 import 'package:one_page_politics/services/md_parser_service.dart';
+import 'package:one_page_politics/services/seed_migration.dart';
 import 'package:one_page_politics/theme/app_theme.dart';
 import 'package:one_page_politics/widgets/path_tree_sheet.dart';
 import 'package:provider/provider.dart';
@@ -20,6 +21,7 @@ void main() {
     SharedPreferences.setMockInitialValues({});
     final prefs = await SharedPreferences.getInstance();
     final storage = MemoryStorage(prefs)..items = sampleItems();
+    await storage.saveSeedRevision(SeedMigration.revision);
     final study = StudyProvider(storage: storage, parser: MdParserService());
     await study.load();
     final theme = ThemeController(prefs);

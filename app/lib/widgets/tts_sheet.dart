@@ -535,6 +535,8 @@ class _TtsSheetState extends State<TtsSheet> {
 
   Widget _controls(ThemeData theme, TtsService service) {
     final current = service.current;
+    final promptText = current == null ? null : ttsPromptText(current);
+    final answerText = current == null ? '' : ttsAnswerText(current);
     final muted = AppColors.muted(theme.brightness);
     return Column(
       mainAxisSize: MainAxisSize.min,
@@ -577,15 +579,15 @@ class _TtsSheetState extends State<TtsSheet> {
                 ),
                 const SizedBox(height: 6),
                 Text(
-                  current?.prompt ?? '按播放，从当前筛选列表开始朗读',
+                  promptText ?? '按播放，从当前筛选列表开始朗读',
                   style: theme.textTheme.bodyLarge,
                   maxLines: 3,
                   overflow: TextOverflow.ellipsis,
                 ),
-                if (current != null && current.answer.isNotEmpty) ...[
+                if (answerText.isNotEmpty) ...[
                   const SizedBox(height: 6),
                   Text(
-                    current.answer,
+                    answerText,
                     style: theme.textTheme.bodySmall?.copyWith(
                       color: AppColors.amber,
                     ),

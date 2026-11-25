@@ -15,7 +15,7 @@ const int ttsFailureThreshold = 3;
 
 /// 题干朗读文本：为空时用占位文本，避免引擎朗读空白。
 ///
-/// 只有播放循环使用它；播控条显示的是条目原始题干，不经过这里。
+/// 播放循环与播控条共用它，保证看到的文本与听到的一致。
 String ttsPromptText(KnowledgeItem item) {
   final prompt = item.prompt.trim();
   return prompt.isEmpty ? '（空题干）' : prompt;

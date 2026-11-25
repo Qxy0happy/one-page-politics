@@ -7,6 +7,7 @@ import '../models/knowledge_item.dart';
 import '../models/sheet_path.dart';
 import '../services/md_parser_service.dart';
 import '../services/merge_service.dart';
+import '../services/seed_migration.dart';
 import '../services/sheet_tree_service.dart';
 import '../services/storage_service.dart';
 
@@ -107,10 +108,11 @@ class StudyProvider extends ChangeNotifier {
     try {
       final saved = await storage.loadItems();
       if (saved != null && saved.isNotEmpty) {
-        _setItems(saved);
+        _setItems(await _migrateSeedIfNeeded(saved));
       } else {
         final seed = await rootBundle.loadString('assets/default_sheet.md');
         _setItems(await storage.loadSeed(seed, parser));
+        await storage.saveSeedRevision(SeedMigration.revision);
       }
       _path = _validPath(storage.loadSheetPath());
     } catch (error) {
@@ -118,6 +120,20 @@ class StudyProvider extends ChangeNotifier {
     }
     _loading = false;
     notifyListeners();
+  }
+
+  /// 只更新本次修订涉及的 seed 条目；不动其他条目，也不新增。
+  Future<List<KnowledgeItem>> _migrateSeedIfNeeded(
+    List<KnowledgeItem> saved,
+  ) async {
+    if (storage.loadSeedRevision() >= SeedMigration.revision) return saved;
+    final seed = await rootBundle.loadString('assets/default_sheet.md');
+    final parsed = parser.parse(seed);
+    if (!parsed.isValid) return saved;
+    final migrated = SeedMigration.apply(saved, parsed.items);
+    await storage.saveItems(migrated);
+    await storage.saveSeedRevision(SeedMigration.revision);
+    return migrated;
   }
 
   Future<void> setPath(SheetPath value) async {
@@ -258,6 +274,7 @@ class StudyProvider extends ChangeNotifier {
     _revalidatePath();
     notifyListeners();
     await _persist();
+    await storage.saveSeedRevision(SeedMigration.revision);
   }
 
   Future<void> clearAll() async {
@@ -275,6 +292,7 @@ class StudyProvider extends ChangeNotifier {
     _revealed.clear();
     notifyListeners();
     await _persist();
+    await storage.saveSeedRevision(SeedMigration.revision);
   }
 
   SheetPath _validPath(SheetPath? path) {

@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter_test/flutter_test.dart';
 import 'package:material_ui/material_ui.dart';
 import 'package:one_page_politics/models/knowledge_item.dart';
@@ -40,6 +42,13 @@ class WidgetTtsEngine implements TtsEngine {
   Future<void> dispose() async {}
 }
 
+class BlockingTtsEngine extends WidgetTtsEngine {
+  final _gate = Completer<bool>();
+
+  @override
+  Future<bool> speak(String text) => _gate.future;
+}
+
 KnowledgeItem makeItem(String prompt) => KnowledgeItem(
   id: prompt,
   subject: Subject.mayuan,
@@ -47,6 +56,16 @@ KnowledgeItem makeItem(String prompt) => KnowledgeItem(
   cardType: CardType.mapping,
   prompt: prompt,
   answer: '结论',
+);
+
+KnowledgeItem makeTrueFalseItem() => const KnowledgeItem(
+  id: 'mayuan.trueFalse.04e9fd74',
+  subject: Subject.mayuan,
+  chapter: '1.4',
+  cardType: CardType.trueFalse,
+  prompt: '科技革命是根本动力',
+  explanation: '人民群众是根本动力',
+  isTrue: false,
 );
 
 void main() {
@@ -140,5 +159,27 @@ void main() {
     expect(field.enableIMEPersonalizedLearning, isFalse);
     expect(find.byTooltip('显示密钥'), findsNothing);
     expect(find.byTooltip('隐藏密钥'), findsNothing);
+  });
+
+  testWidgets('播控条显示实际朗读的判定与括注', (tester) async {
+    SharedPreferences.setMockInitialValues({});
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: TtsSheet(
+            items: [makeTrueFalseItem()],
+            serviceFactory: (settings) =>
+                TtsService(engine: BlockingTtsEngine()),
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byIcon(Icons.play_arrow));
+    await tester.pump();
+
+    expect(find.text('科技革命是根本动力'), findsOneWidget);
+    expect(find.text('错误。人民群众是根本动力'), findsOneWidget);
   });
 }

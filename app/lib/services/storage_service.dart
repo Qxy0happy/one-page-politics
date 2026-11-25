@@ -26,6 +26,7 @@ class StorageService {
   static const _itemsFile = 'knowledge_items.json';
   static const _recordsFile = 'exam_records.json';
   static const _sheetPathKey = 'sheetPath';
+  static const _seedRevisionKey = 'seedRevision';
   static const _schemaVersion = 1;
 
   Future<Directory> _directory() async {
@@ -137,6 +138,12 @@ class StorageService {
     await prefs.remove(_sheetPathKey);
   }
 
+  int loadSeedRevision() => prefs.getInt(_seedRevisionKey) ?? 0;
+
+  Future<void> saveSeedRevision(int revision) async {
+    await prefs.setInt(_seedRevisionKey, revision);
+  }
+
   Future<List<KnowledgeItem>> loadSeed(
     String seedText,
     MdParserService parser,
@@ -174,6 +181,7 @@ class StorageService {
 
   Future<void> clearAll() async {
     await prefs.remove(_sheetPathKey);
+    await prefs.remove(_seedRevisionKey);
     for (final name in const [_itemsFile, _recordsFile]) {
       final file = await _file(name);
       if (await file.exists()) await file.delete();
