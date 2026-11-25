@@ -2,7 +2,7 @@
 
 个人 Android 背诵工具：把“一页纸”考点做成可逐条刷眼、磨耳朵、微训练的本地应用。学习数据保存在本机；默认使用系统离线语音，可选的 DeepSeek 云语音需要网络与 API Key，release 因此声明 `INTERNET` 权限。
 
-**[下载最新 release](https://github.com/Qxy0happy/one-page-politics/releases/latest)** · 当前版本 `1.2.2+5`（release `v1.2.2`）
+**[下载最新 release](https://github.com/Qxy0happy/one-page-politics/releases/latest)** · 当前版本 `1.2.3+6`（release `v1.2.3`）
 
 ## 功能
 
@@ -45,12 +45,12 @@
 
 ## 安装
 
-1. 从 [Releases](https://github.com/Qxy0happy/one-page-politics/releases/latest) 下载 APK（当前为 `one-page-politics-1.2.2.apk`，arm64-v8a，约 19 MB）和 `.sha256`。
+1. 从 [Releases](https://github.com/Qxy0happy/one-page-politics/releases/latest) 下载 APK（当前为 `one-page-politics-1.2.3.apk`，arm64-v8a，约 20 MB）和 `.sha256`。
 2. 在手机上允许“安装未知应用”，打开 APK 安装。
 3. 校验：
 
    ```bash
-   sha256sum -c one-page-politics-1.2.2.apk.sha256
+   sha256sum -c one-page-politics-1.2.3.apk.sha256
    ```
 
 4. 覆盖安装需要签名一致。v1.2.0 起使用专用 release keystore；如果手机上仍是 v1.1.0 或更早的 debug 签名版本，必须先卸载旧版再安装。卸载会删除本机学习进度、真题记录与音频缓存，且应用不提供进度导出。
@@ -162,7 +162,7 @@ tools/
 
 ## 版本与边界
 
-- 当前版本：`1.2.2+5`（release `v1.2.2`）；Android 7.0（API 24）及以上，仅 arm64-v8a。
+- 当前版本：`1.2.3+6`（release `v1.2.3`）；Android 7.0（API 24）及以上，仅 arm64-v8a。
 - 仅面向 Android 个人侧载；默认系统语音离线，DeepSeek 云语音需要网络；更新检查需要访问 GitHub，可在作战室关闭启动检查。
 - 应用内更新只下载完整 APK，不做字节级差分包；支持断点续传，不做后台下载、静默安装或系统级自动更新。
 - v1.2.0 起使用专用 release keystore。v1.1.0 及更早的 debug 签名版本无法覆盖升级，首次安装需要卸载；卸载会丢失本机进度、真题记录与音频缓存。
